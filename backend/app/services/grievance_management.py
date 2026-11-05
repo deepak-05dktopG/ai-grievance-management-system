@@ -1,5 +1,8 @@
 import logging
 import math
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from pymongo.database import Database
@@ -8,6 +11,7 @@ from pymongo.errors import DuplicateKeyError
 from app.core.config import get_settings
 from app.database.grievances import (
     get_grievance,
+    get_audit_logs,
     insert_audit_log,
     insert_grievance,
     list_grievances,
@@ -19,6 +23,8 @@ from app.models.enums import AIProcessingStatus, GrievanceStatus, UserRole
 from app.models.grievance import GrievanceDocument, OfficerApprovedValues
 from app.models.user import UserDocument
 from app.schemas.grievance import (
+    AuditLogResponse,
+    GrievanceTrackingResponse,
     GrievanceCreateRequest,
     GrievanceResponse,
     GrievanceReviewRequest,
@@ -84,6 +90,10 @@ class GrievanceAccessDeniedError(Exception):
     pass
 
 
+class InvalidCitizenAccessTokenError(Exception):
+    pass
+
+
 def ensure_grievance_access(
     grievance: GrievanceDocument,
     actor: UserDocument,
@@ -140,6 +150,12 @@ def create_grievance(
     request: GrievanceCreateRequest,
 ) -> GrievanceDocument:
     grievance = GrievanceDocument(**request.model_dump())
+    citizen_access_token = secrets.token_urlsafe(32)
+    grievance.citizen_access_token = citizen_access_token
+    grievance.citizen_access_token_hash = hashlib.sha256(
+        citizen_access_token.encode("utf-8")
+    ).hexdigest()
+    grievance.citizen_access_token_expires_at = utc_now() + timedelta(days=30)
     settings = get_settings()
     try:
         suggestion = classify_complaint(grievance.complaint_description, settings)
@@ -170,15 +186,14 @@ def create_grievance(
         try:
             with session:
                 with session.start_transaction():
-                    insert_grievance(
-                        database,
-                        grievance.model_dump(
-                            by_alias=True,
-                            mode="python",
-                            exclude_none=True,
-                        ),
-                        session,
+                    document = grievance.model_dump(
+                        by_alias=True,
+                        mode="python",
+                        exclude_none=True,
                     )
+                    document["citizen_access_token_hash"] = grievance.citizen_access_token_hash
+                    document["citizen_access_token_expires_at"] = grievance.citizen_access_token_expires_at
+                    insert_grievance(database, document, session)
                     _insert_audit_event(
                         database,
                         grievance=grievance,
@@ -200,6 +215,56 @@ def create_grievance(
                 raise ReferenceIdConflictError from None
             grievance.reference_id = generate_grievance_reference_id()
     raise ReferenceIdConflictError
+
+
+def verify_citizen_access_token(
+    database: Database,
+    reference_id: str,
+    token: str,
+) -> GrievanceDocument:
+    document = get_grievance(database, reference_id)
+    if document is None:
+        raise GrievanceNotFoundError
+    expected_hash = document.get("citizen_access_token_hash")
+    expires_at = document.get("citizen_access_token_expires_at")
+    supplied_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if (
+        not isinstance(expected_hash, str)
+        or not secrets.compare_digest(expected_hash, supplied_hash)
+        or not isinstance(expires_at, datetime)
+        or expires_at <= utc_now()
+    ):
+        raise InvalidCitizenAccessTokenError
+    return GrievanceDocument.model_validate(document)
+
+
+def get_citizen_tracking(
+    database: Database,
+    reference_id: str,
+    token: str,
+) -> GrievanceTrackingResponse:
+    grievance = verify_citizen_access_token(database, reference_id, token)
+    return GrievanceTrackingResponse(
+        reference_id=grievance.reference_id,
+        status=grievance.status,
+        ai_processing_status=grievance.ai_processing_status.value,
+        created_at=grievance.created_at,
+        updated_at=grievance.updated_at,
+    )
+
+
+def list_grievance_audit_logs(
+    database: Database,
+    reference_id: str,
+    actor: UserDocument,
+) -> list[AuditLogResponse]:
+    grievance = get_grievance_by_reference(database, reference_id, actor)
+    return [
+        AuditLogResponse.model_validate(document)
+        for document in get_audit_logs(database, grievance.reference_id)
+    ]
 
 
 def get_grievance_by_reference(

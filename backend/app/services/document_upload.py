@@ -23,7 +23,9 @@ from app.models.user import UserDocument
 from app.services.grievance_management import (
     GrievanceAccessDeniedError,
     GrievanceNotFoundError,
+    InvalidCitizenAccessTokenError,
     ensure_grievance_access,
+    verify_citizen_access_token,
 )
 
 
@@ -118,15 +120,25 @@ def upload_supporting_document(
     filename: str | None,
     content_type: str | None,
     content: bytes,
-    actor: UserDocument,
+    actor: UserDocument | None,
+    citizen_access_token: str | None,
 ) -> DocumentMetadata:
     clean_filename, file_format = _validate_document(filename, content_type, content)
 
-    grievance_document = get_grievance(database, reference_id)
-    if grievance_document is None:
-        raise GrievanceNotFoundError
-    grievance = GrievanceDocument.model_validate(grievance_document)
-    ensure_grievance_access(grievance, actor)
+    if actor is not None:
+        grievance_document = get_grievance(database, reference_id)
+        if grievance_document is None:
+            raise GrievanceNotFoundError
+        grievance = GrievanceDocument.model_validate(grievance_document)
+        ensure_grievance_access(grievance, actor)
+    elif citizen_access_token is not None:
+        grievance = verify_citizen_access_token(
+            database,
+            reference_id,
+            citizen_access_token,
+        )
+    else:
+        raise InvalidCitizenAccessTokenError
 
     settings = get_settings()
     if not settings.has_cloudinary_configuration:
@@ -202,12 +214,10 @@ def upload_supporting_document(
                     reference_id=reference_id,
                     action="grievance.document_uploaded",
                     actor=AuditActor(
-                        actor_type=(
-                            "admin"
-                            if actor.role is UserRole.ADMIN
-                            else "officer"
+                        actor_type="citizen" if actor is None else (
+                            "admin" if actor.role is UserRole.ADMIN else "officer"
                         ),
-                        actor_id=actor.id,
+                        actor_id=actor.id if actor is not None else None,
                     ),
                     new_values={
                         "cloudinary_public_id": metadata.cloudinary_public_id,

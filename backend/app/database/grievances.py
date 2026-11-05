@@ -23,6 +23,14 @@ def get_grievance(
     )
 
 
+def get_audit_logs(database: Database, reference_id: str) -> list[dict[str, Any]]:
+    return list(
+        database[AUDIT_LOGS_COLLECTION]
+        .find({"reference_id": reference_id})
+        .sort("created_at", 1)
+    )
+
+
 def list_grievances(
     database: Database,
     query: dict[str, Any],

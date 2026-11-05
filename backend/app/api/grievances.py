@@ -4,6 +4,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Header,
     HTTPException,
     Path,
     Query,
@@ -12,27 +13,33 @@ from fastapi import (
 )
 from pymongo.database import Database
 
-from app.api.auth_dependencies import get_current_user
+from app.api.auth_dependencies import DocumentUploader, get_current_user, get_document_uploader
 from app.api.dependencies import get_database
 from app.models.enums import GrievanceStatus, Priority, UserRole
 from app.models.grievance import DocumentMetadata, GrievanceDocument
 from app.models.user import UserDocument
 from app.schemas.grievance import (
+    AuditLogResponse,
     GrievanceCreateRequest,
     GrievanceListResponse,
     GrievanceResponse,
     GrievanceReviewRequest,
+    GrievanceSubmissionResponse,
     GrievanceStatusUpdateRequest,
+    GrievanceTrackingResponse,
 )
 from app.services.grievance_management import (
     MAX_PAGE_SIZE,
     GrievanceAccessDeniedError,
     GrievanceNotFoundError,
+    InvalidCitizenAccessTokenError,
     InvalidDepartmentError,
     InvalidStatusTransitionError,
     ReferenceIdConflictError,
     create_grievance,
     get_grievance_by_reference,
+    get_citizen_tracking,
+    list_grievance_audit_logs,
     list_grievance_page,
     review_grievance,
     update_grievance_status,
@@ -70,19 +77,48 @@ def _not_found() -> HTTPException:
 
 @router.post(
     "",
-    response_model=GrievanceResponse,
+    response_model=GrievanceSubmissionResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def submit_grievance(
     request: GrievanceCreateRequest,
     database: Annotated[Database, Depends(get_database)],
-) -> GrievanceDocument:
+) -> GrievanceSubmissionResponse:
     try:
-        return create_grievance(database, request)
+        grievance = create_grievance(database, request)
+        response = GrievanceResponse.model_validate(grievance).model_dump(
+            mode="json",
+            by_alias=True,
+        )
+        response["citizen_access_token"] = grievance.citizen_access_token
+        return GrievanceSubmissionResponse.model_validate(response)
     except ReferenceIdConflictError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Could not allocate a unique grievance reference",
+        ) from None
+
+
+@router.get(
+    "/{reference_id}/track",
+    response_model=GrievanceTrackingResponse,
+)
+def track_grievance(
+    reference_id: ReferenceId,
+    database: Annotated[Database, Depends(get_database)],
+    citizen_access_token: Annotated[
+        str,
+        Header(alias="X-Citizen-Access-Token"),
+    ],
+) -> GrievanceTrackingResponse:
+    try:
+        return get_citizen_tracking(database, reference_id, citizen_access_token)
+    except GrievanceNotFoundError:
+        raise _not_found() from None
+    except InvalidCitizenAccessTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired citizen access token",
         ) from None
 
 
@@ -202,6 +238,26 @@ def update_status(
         ) from None
 
 
+@router.get(
+    "/{reference_id}/audit-logs",
+    response_model=list[AuditLogResponse],
+)
+def grievance_audit_logs(
+    reference_id: ReferenceId,
+    database: Annotated[Database, Depends(get_database)],
+    current_user: Annotated[UserDocument, Depends(get_current_user)],
+) -> list[AuditLogResponse]:
+    try:
+        return list_grievance_audit_logs(database, reference_id, current_user)
+    except GrievanceNotFoundError:
+        raise _not_found() from None
+    except GrievanceAccessDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Grievance is outside your department",
+        ) from None
+
+
 @router.post(
     "/{reference_id}/documents",
     response_model=DocumentMetadata,
@@ -210,7 +266,7 @@ def update_status(
 async def upload_document(
     reference_id: ReferenceId,
     database: Annotated[Database, Depends(get_database)],
-    current_user: Annotated[UserDocument, Depends(get_current_user)],
+    uploader: Annotated[DocumentUploader, Depends(get_document_uploader)],
     file: UploadFile = File(...),
 ) -> DocumentMetadata:
     content = await file.read(5 * 1024 * 1024 + 1)
@@ -221,7 +277,8 @@ async def upload_document(
             filename=file.filename,
             content_type=file.content_type,
             content=content,
-            actor=current_user,
+            actor=uploader.actor,
+            citizen_access_token=uploader.citizen_access_token,
         )
     except DocumentTooLargeError:
         raise HTTPException(
@@ -239,6 +296,11 @@ async def upload_document(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Grievance is outside your department",
+        ) from None
+    except InvalidCitizenAccessTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired citizen access token",
         ) from None
     except DocumentUploadConfigurationError:
         raise HTTPException(

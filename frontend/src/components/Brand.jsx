@@ -1,0 +1,16 @@
+export default function Brand({ compact = false }) {
+  return (
+    <div className={`brand-lockup ${compact ? 'brand-compact' : ''}`}>
+      <span className="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" role="presentation">
+          <path d="M16 3 27 8v7c0 7.3-4.7 12.1-11 14-6.3-1.9-11-6.7-11-14V8l11-5Z" />
+          <path d="m10.5 16.2 3.6 3.6 7.7-8" />
+        </svg>
+      </span>
+      <span className="brand-copy">
+        <strong>Creditfix</strong>
+        {!compact && <small>Public Grievance Service</small>}
+      </span>
+    </div>
+  );
+}

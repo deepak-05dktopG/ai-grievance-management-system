@@ -49,10 +49,20 @@ only creates an admin when no admin account exists.
 Authentication endpoints are `POST /api/v1/auth/login`,
 `GET /api/v1/auth/me`, and admin-only `POST /api/v1/auth/users`. Login returns a
 short-lived JWT. Admins can access all grievances; officers can access only
-grievances whose effective department matches their account. Grievance
-submission remains public, but reading, reviewing, changing status, and
-uploading documents require an authenticated account. There are no citizen
-accounts in this step, so anonymous document uploads are not permitted.
+grievances whose effective department matches their account. Staff grievance
+listing, retrieval, review, status changes, document uploads, and audit history
+require an authenticated account. Despite these controls, the prototype API
+must not be exposed on an untrusted public interface.
+
+Citizen grievance submission remains public. A successful submission returns a
+private, grievance-scoped access code once. Only its SHA-256 hash is stored;
+the code expires after 30 days. Citizens can retrieve limited status and
+timestamp information with `GET /api/v1/grievances/{reference_id}/track` and
+the `X-Citizen-Access-Token` header. The same access code authorizes document
+uploads for that grievance only; arbitrary anonymous uploads are not allowed.
+Keep the access code private. Authenticated staff can view the audit trail at
+`GET /api/v1/grievances/{reference_id}/audit-logs`, subject to role and
+department access controls.
 
 Grievance submission uses Gemini when `GEMINI_API_KEY` is configured. Set
 `GEMINI_MODEL`, `GEMINI_CONFIDENCE_THRESHOLD` (0-1), and `GEMINI_TIMEOUT_MS` in
@@ -72,12 +82,22 @@ secure URL and file metadata with the grievance.
 
 ## Frontend setup
 
-Install dependencies and run the Vite development server from `frontend/`:
+Set `VITE_API_BASE_URL` to the backend origin (for example,
+`http://127.0.0.1:8000`) in the frontend's local Vite environment. Do not put
+secrets in Vite environment variables; values prefixed with `VITE_` are exposed
+to the browser. Install dependencies and run the Vite development server from
+`frontend/`:
 
 ```powershell
 npm install
+$env:VITE_API_BASE_URL = "http://127.0.0.1:8000"
 npm run dev
 ```
+
+The citizen portal is available at `/`; staff sign in at `/login`. After
+authentication, officers and administrators use `/dashboard`; administrators
+can create accounts at `/dashboard/users`. A production bundle can be created
+with `npm run build`.
 
 ## Notes
 This project is being implemented incrementally. The current backend provides

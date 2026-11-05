@@ -164,3 +164,18 @@ class GrievanceDocument(TimestampedModel):
     assigned_officer_id: MongoObjectId | None = None
     status: GrievanceStatus = GrievanceStatus.SUBMITTED
     supporting_documents: list[DocumentMetadata] = Field(default_factory=list)
+    citizen_access_token_hash: str | None = Field(
+        default=None,
+        repr=False,
+        exclude=True,
+    )
+    citizen_access_token_expires_at: datetime | None = Field(
+        default=None,
+        repr=False,
+        exclude=True,
+    )
+    citizen_access_token: str | None = Field(
+        default=None,
+        repr=False,
+        exclude=True,
+    )

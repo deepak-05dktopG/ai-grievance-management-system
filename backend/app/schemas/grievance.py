@@ -1,8 +1,11 @@
+from datetime import datetime
+
 from pydantic import Field, field_validator, model_validator
 
 from app.models.common import ComplaintDescription, MongoModel, MongoObjectId
 from app.models.department import DepartmentReference
 from app.models.enums import GrievanceStatus, Priority
+from app.models.audit import AuditLogDocument
 from app.models.grievance import CitizenDetails, GrievanceDocument
 
 
@@ -12,6 +15,22 @@ class GrievanceCreateRequest(MongoModel):
 
 
 class GrievanceResponse(GrievanceDocument):
+    id: MongoObjectId = Field(alias="_id", exclude=True)
+
+
+class GrievanceSubmissionResponse(GrievanceResponse):
+    citizen_access_token: str
+
+
+class GrievanceTrackingResponse(MongoModel):
+    reference_id: str
+    status: GrievanceStatus
+    ai_processing_status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuditLogResponse(AuditLogDocument):
     id: MongoObjectId = Field(alias="_id", exclude=True)
 
 
