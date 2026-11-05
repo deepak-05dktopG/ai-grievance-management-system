@@ -15,3 +15,9 @@ class Priority(StrEnum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+
+class AIProcessingStatus(StrEnum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    MANUAL_REVIEW = "manual_review"

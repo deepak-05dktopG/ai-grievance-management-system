@@ -4,11 +4,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
+from pydantic import SecretStr
 
 import app.main as main
 from app.api.dependencies import get_database
 from app.core.config import Settings
 from app.database.indexes import AUDIT_LOGS_COLLECTION, GRIEVANCES_COLLECTION
+from app.models.enums import AIProcessingStatus, Priority
+from app.models.grievance import AISuggestion
+from app.services import grievance_management
+from app.services.ai_classification import GeminiClassificationError
 
 
 class MemoryCursor:
@@ -195,6 +200,11 @@ class MemoryDatabase:
 def api_client(monkeypatch):
     database = MemoryDatabase()
     monkeypatch.setattr(main, "get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr(
+        grievance_management,
+        "get_settings",
+        lambda: Settings(_env_file=None),
+    )
     main.app.dependency_overrides[get_database] = lambda: database
     with TestClient(main.app) as client:
         yield client, database
@@ -230,6 +240,7 @@ def test_submit_creates_grievance_and_audit_event(api_client) -> None:
     assert grievance["reference_id"].startswith("CFX-")
     assert grievance["status"] == "SUBMITTED"
     assert grievance["ai_suggestion"] is None
+    assert grievance["ai_processing_status"] == AIProcessingStatus.MANUAL_REVIEW
     assert "_id" not in grievance
     assert database[GRIEVANCES_COLLECTION].documents[0]["reference_id"] == (
         grievance["reference_id"]
@@ -237,7 +248,116 @@ def test_submit_creates_grievance_and_audit_event(api_client) -> None:
     audit = database[AUDIT_LOGS_COLLECTION].documents[0]
     assert audit["action"] == "grievance.submitted"
     assert audit["actor"]["actor_type"] == "citizen"
-    assert audit["new_values"] == {"status": "SUBMITTED"}
+    assert audit["new_values"] == {
+        "status": "SUBMITTED",
+        "ai_processing_status": "manual_review",
+    }
+
+
+def test_submission_saves_valid_ai_suggestions_and_deterministic_routing(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, database = api_client
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key=SecretStr("synthetic-test-key"),
+        gemini_confidence_threshold=0.65,
+    )
+    monkeypatch.setattr(grievance_management, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        grievance_management,
+        "classify_complaint",
+        lambda description, configured: AISuggestion(
+            category="Roads and Infrastructure",
+            subcategory="Street lighting",
+            summary="A streetlight is not working.",
+            suggested_priority=Priority.HIGH,
+            confidence=0.82,
+            explanation="The complaint concerns a public streetlight.",
+        ),
+    )
+
+    response = client.post("/api/v1/grievances", json=submission_payload())
+
+    assert response.status_code == 201
+    saved = response.json()
+    assert saved["ai_processing_status"] == AIProcessingStatus.COMPLETED
+    assert saved["ai_suggestion"]["category"] == "Roads and Infrastructure"
+    assert saved["recommended_department"] == {
+        "code": "PWD",
+        "name": "Public Works",
+    }
+    assert saved["officer_approved"] is None
+    stored = database[GRIEVANCES_COLLECTION].documents[0]
+    assert stored["ai_suggestion"]["suggested_priority"] == "high"
+    assert "officer_approved" not in stored
+
+
+def test_low_confidence_suggestion_is_saved_for_manual_review(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, _ = api_client
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key=SecretStr("synthetic-test-key"),
+        gemini_confidence_threshold=0.7,
+    )
+    monkeypatch.setattr(grievance_management, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        grievance_management,
+        "classify_complaint",
+        lambda description, configured: AISuggestion(
+            category="Public Health",
+            subcategory="Sanitation",
+            summary="A sanitation concern is reported.",
+            suggested_priority=Priority.MEDIUM,
+            confidence=0.4,
+            explanation="The category is uncertain.",
+        ),
+    )
+
+    response = client.post("/api/v1/grievances", json=submission_payload())
+
+    assert response.status_code == 201
+    saved = response.json()
+    assert saved["ai_processing_status"] == AIProcessingStatus.MANUAL_REVIEW
+    assert saved["ai_suggestion"]["confidence"] == 0.4
+    assert saved["recommended_department"]["code"] == "HD"
+    assert saved["status"] == "SUBMITTED"
+    assert saved["officer_approved"] is None
+
+
+def test_invalid_or_unavailable_ai_keeps_submission_for_manual_review(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, database = api_client
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key=SecretStr("synthetic-test-key"),
+    )
+    monkeypatch.setattr(grievance_management, "get_settings", lambda: settings)
+
+    def fail_classification(description, configured):
+        raise GeminiClassificationError("invalid_or_unavailable_response")
+
+    monkeypatch.setattr(
+        grievance_management,
+        "classify_complaint",
+        fail_classification,
+    )
+    response = client.post("/api/v1/grievances", json=submission_payload())
+
+    assert response.status_code == 201
+    saved = response.json()
+    assert saved["status"] == "SUBMITTED"
+    assert saved["ai_processing_status"] == AIProcessingStatus.MANUAL_REVIEW
+    assert saved["ai_suggestion"] is None
+    assert saved["recommended_department"] is None
+    assert len(database[GRIEVANCES_COLLECTION].documents) == 1
+    assert len(database[AUDIT_LOGS_COLLECTION].documents) == 1
 
 
 def test_duplicate_reference_collision_is_retried(api_client) -> None:

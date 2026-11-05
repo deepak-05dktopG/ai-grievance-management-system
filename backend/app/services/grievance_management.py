@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
+from app.core.config import get_settings
 from app.database.grievances import (
     get_grievance,
     insert_audit_log,
@@ -14,7 +15,7 @@ from app.database.grievances import (
 )
 from app.models.audit import AuditActor, AuditLogDocument
 from app.models.common import utc_now
-from app.models.enums import GrievanceStatus
+from app.models.enums import AIProcessingStatus, GrievanceStatus
 from app.models.grievance import GrievanceDocument, OfficerApprovedValues
 from app.schemas.grievance import (
     GrievanceCreateRequest,
@@ -25,6 +26,10 @@ from app.schemas.grievance import (
 from app.services.department_mapping import (
     get_department_by_code,
     recommend_department,
+)
+from app.services.ai_classification import (
+    GeminiClassificationError,
+    classify_complaint,
 )
 from app.services.reference_id import generate_grievance_reference_id
 
@@ -107,8 +112,33 @@ def create_grievance(
     database: Database,
     request: GrievanceCreateRequest,
 ) -> GrievanceDocument:
+    grievance = GrievanceDocument(**request.model_dump())
+    settings = get_settings()
+    try:
+        suggestion = classify_complaint(grievance.complaint_description, settings)
+    except GeminiClassificationError as exc:
+        grievance.ai_processing_status = AIProcessingStatus.MANUAL_REVIEW
+        logger.warning(
+            "Grievance saved for manual review after classification failure",
+            extra={
+                "event": "grievance_classification_manual_review",
+                "failure_code": exc.failure_code,
+            },
+        )
+    else:
+        grievance.ai_suggestion = suggestion
+        grievance.recommended_department = recommend_department(
+            suggestion.category
+        )
+        if (
+            grievance.recommended_department is not None
+            and suggestion.confidence >= settings.gemini_confidence_threshold
+        ):
+            grievance.ai_processing_status = AIProcessingStatus.COMPLETED
+        else:
+            grievance.ai_processing_status = AIProcessingStatus.MANUAL_REVIEW
+
     for attempt in range(MAX_REFERENCE_ID_ATTEMPTS):
-        grievance = GrievanceDocument(**request.model_dump())
         session = database.client.start_session()
         try:
             with session:
@@ -127,7 +157,10 @@ def create_grievance(
                         grievance=grievance,
                         action="grievance.submitted",
                         actor_type="citizen",
-                        new_values={"status": grievance.status.value},
+                        new_values={
+                            "status": grievance.status.value,
+                            "ai_processing_status": grievance.ai_processing_status.value,
+                        },
                         session=session,
                     )
             return grievance

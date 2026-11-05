@@ -50,6 +50,11 @@ _CATEGORY_TO_DEPARTMENT = {
     for department in ILLUSTRATIVE_DEPARTMENTS
     for category in department.supported_categories
 }
+_CANONICAL_CATEGORY = {
+    _normalize_category(category): category
+    for department in ILLUSTRATIVE_DEPARTMENTS
+    for category in department.supported_categories
+}
 _DEPARTMENT_BY_CODE = {
     department.code.casefold(): department for department in ILLUSTRATIVE_DEPARTMENTS
 }
@@ -69,3 +74,7 @@ def get_department_by_code(code: str) -> DepartmentReference | None:
     if department is None:
         return None
     return DepartmentReference(code=department.code, name=department.name)
+
+
+def canonicalize_supported_category(category: str) -> str | None:
+    return _CANONICAL_CATEGORY.get(_normalize_category(category))

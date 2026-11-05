@@ -14,7 +14,7 @@ from app.models.common import (
     utc_now,
 )
 from app.models.department import DepartmentReference
-from app.models.enums import GrievanceStatus, Priority
+from app.models.enums import AIProcessingStatus, GrievanceStatus, Priority
 from app.services.reference_id import generate_grievance_reference_id
 
 
@@ -158,6 +158,7 @@ class GrievanceDocument(TimestampedModel):
     citizen_details: CitizenDetails
     complaint_description: ComplaintDescription
     ai_suggestion: AISuggestion | None = None
+    ai_processing_status: AIProcessingStatus = AIProcessingStatus.PENDING
     recommended_department: DepartmentReference | None = None
     officer_approved: OfficerApprovedValues | None = None
     assigned_officer_id: MongoObjectId | None = None
