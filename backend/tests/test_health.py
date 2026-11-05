@@ -7,6 +7,7 @@ from pydantic import SecretStr
 
 import app.main as main
 from app.core.config import Settings
+from app.database.indexes import GRIEVANCE_INDEXES, GRIEVANCES_COLLECTION
 
 
 class FakeMongoAdmin:
@@ -30,15 +31,38 @@ class FakeMongoAdmin:
 class FakeMongoClient:
     def __init__(self, *, fail_on_call: int | set[int] | None = None) -> None:
         self.admin = FakeMongoAdmin(fail_on_call=fail_on_call)
+        self.database = FakeMongoDatabase()
         self.database_name: str | None = None
         self.closed = False
 
-    def __getitem__(self, database_name: str) -> object:
+    def __getitem__(self, database_name: str) -> "FakeMongoDatabase":
         self.database_name = database_name
-        return object()
+        return self.database
 
     def close(self) -> None:
         self.closed = True
+
+
+class FakeMongoCollection:
+    def __init__(self) -> None:
+        self.created_indexes: list[tuple[list[tuple[str, int]], dict[str, object]]] = []
+
+    def create_index(
+        self,
+        keys: list[tuple[str, int]],
+        **options: object,
+    ) -> str:
+        self.created_indexes.append((keys, options))
+        return str(options["name"])
+
+
+class FakeMongoDatabase:
+    def __init__(self) -> None:
+        self.collection = FakeMongoCollection()
+
+    def __getitem__(self, collection_name: str) -> FakeMongoCollection:
+        assert collection_name == GRIEVANCES_COLLECTION
+        return self.collection
 
 
 @pytest.fixture
@@ -117,6 +141,7 @@ def test_health_reports_connected_when_ping_succeeds(client_factory) -> None:
     assert len(clients) == 1
     assert clients[0].admin.calls == 2
     assert clients[0].database_name == "creditfix_test"
+    assert clients[0].database.collection.created_indexes == list(GRIEVANCE_INDEXES)
 
 
 def test_health_reports_unconfigured_database(monkeypatch) -> None:

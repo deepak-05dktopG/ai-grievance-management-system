@@ -8,6 +8,7 @@ from pymongo.errors import PyMongoError
 
 from app.api.health import router as health_router
 from app.core.config import get_settings
+from app.database.indexes import ensure_grievance_indexes
 from app.database.mongo import create_mongo_client, ping_mongo
 
 
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.mongodb_client = client
         app.state.mongodb_database = client[settings.mongodb_db_name]
         ping_mongo(client)
+        ensure_grievance_indexes(app.state.mongodb_database)
     except (PyMongoError, ValueError) as exc:
         app.state.mongodb_status = "unavailable"
         logger.error(

@@ -51,4 +51,7 @@ npm run dev
 
 ## Notes
 This project is being implemented incrementally. The current backend provides
-configuration, MongoDB connection lifecycle management, and health reporting.
+configuration, MongoDB connection lifecycle management, health reporting,
+grievance data models and validation, deterministic illustrative department
+mapping, and grievance collection indexes. No grievance API or AI integration
+is implemented yet.
