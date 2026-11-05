@@ -26,6 +26,7 @@ class GrievanceTrackingResponse(MongoModel):
     reference_id: str
     status: GrievanceStatus
     ai_processing_status: str
+    officer_reviewed: bool
     created_at: datetime
     updated_at: datetime
 

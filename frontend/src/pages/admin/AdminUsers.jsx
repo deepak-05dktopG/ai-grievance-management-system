@@ -12,6 +12,19 @@ const DEPARTMENTS = [
   ['RD', 'Land and Revenue'],
 ];
 
+function getUserCreationErrorMessage(error) {
+  const detail = error.response?.data?.detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((issue) => issue?.msg)
+      .filter((message) => typeof message === 'string');
+    return messages.length
+      ? messages.join(' ')
+      : 'The user details are invalid. Please check the form and try again.';
+  }
+  return getErrorMessage(error);
+}
+
 export default function AdminUsers() {
   const [form, setForm] = useState({
     name: '',
@@ -48,7 +61,7 @@ export default function AdminUsers() {
       setNotice(`${data.role} account created for ${data.email}.`);
       setForm({ name: '', email: '', password: '', role: 'OFFICER', departmentCode: 'PWD' });
     } catch (createError) {
-      setError(getErrorMessage(createError));
+      setError(getUserCreationErrorMessage(createError));
     } finally {
       setSaving(false);
     }

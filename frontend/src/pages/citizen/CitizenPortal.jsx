@@ -7,6 +7,27 @@ import { Link } from 'react-router-dom';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const TRACKING_PROGRESS = {
+  SUBMITTED: 'Awaiting staff review',
+  UNDER_REVIEW: 'Staff review in progress',
+  IN_PROGRESS: 'Work in progress',
+  RESOLVED: 'Resolved',
+  REJECTED: 'Decision recorded',
+  CLOSED: 'Case closed',
+};
+
+function getTrackingProgress(tracking) {
+  if (tracking.officer_reviewed) return 'Reviewed by staff';
+  return TRACKING_PROGRESS[tracking.status] || 'Status unavailable';
+}
+
+function formatTrackingDate(value, options) {
+  if (!value) return 'Unavailable';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? 'Unavailable'
+    : date.toLocaleString(undefined, options);
+}
 
 function filesFromInput(input) {
   const files = Array.from(input || []);
@@ -129,6 +150,7 @@ export default function CitizenPortal() {
         reference_id: data.reference_id,
         status: data.status,
         ai_processing_status: data.ai_processing_status,
+        officer_reviewed: false,
         created_at: data.created_at,
         updated_at: data.updated_at,
       });
@@ -154,6 +176,9 @@ export default function CitizenPortal() {
     }
     try {
       const { data } = await grievanceApi.track(trackingReference.trim(), token);
+      if (!data?.reference_id || !data?.status) {
+        throw new Error('The tracking response was incomplete. Please try again later.');
+      }
       setTracking(data);
       setTrackingToken(token);
     } catch (error) {
@@ -413,11 +438,15 @@ export default function CitizenPortal() {
                 <strong className="tracking-ref">{tracking.reference_id}</strong>
                 <div className="tracking-meta">
                   <span>Submitted</span>
-                  <strong>{new Date(tracking.created_at).toLocaleDateString()}</strong>
+                  <strong>{formatTrackingDate(tracking.created_at, { dateStyle: 'medium' })}</strong>
                 </div>
                 <div className="tracking-meta">
                   <span>Review progress</span>
-                  <strong>{tracking.ai_processing_status === 'manual_review' ? 'Pending staff review' : 'Recorded'}</strong>
+                  <strong>{getTrackingProgress(tracking)}</strong>
+                </div>
+                <div className="tracking-meta">
+                  <span>Last updated</span>
+                  <strong>{formatTrackingDate(tracking.updated_at, { dateStyle: 'medium', timeStyle: 'short' })}</strong>
                 </div>
               </div>
             )}

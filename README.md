@@ -34,11 +34,15 @@ HTTP 503 unless the connection is available.
 Run the API and tests from `backend/`:
 
 ```powershell
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 python -m pytest
 ```
 
-Open `http://127.0.0.1:8000/health` to check application and database status.
+The backend reads configuration from `backend/.env` regardless of the current
+working directory. Use one backend process on port `8000` for the demo. Stop
+any older process in its terminal with `Ctrl+C` before starting it, then check
+`http://127.0.0.1:8000/health` to confirm the expected process and database
+status.
 Set `JWT_SECRET_KEY` to a randomly generated value of at least 32 characters
 and optionally set `JWT_ACCESS_TOKEN_MINUTES` in `backend/.env`. Generate a
 secret with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
@@ -93,6 +97,9 @@ npm install
 $env:VITE_API_BASE_URL = "http://127.0.0.1:8000"
 npm run dev
 ```
+
+Keep `VITE_API_BASE_URL` pointed at the same backend origin, `http://127.0.0.1:8000`,
+and open the Vite URL shown in the terminal (normally `http://127.0.0.1:5173`).
 
 The citizen portal is available at `/`; staff sign in at `/login`. After
 authentication, officers and administrators use `/dashboard`; administrators

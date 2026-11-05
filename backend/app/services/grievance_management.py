@@ -250,6 +250,7 @@ def get_citizen_tracking(
         reference_id=grievance.reference_id,
         status=grievance.status,
         ai_processing_status=grievance.ai_processing_status.value,
+        officer_reviewed=grievance.officer_approved is not None,
         created_at=grievance.created_at,
         updated_at=grievance.updated_at,
     )
