@@ -1,7 +1,9 @@
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import Mock
 
+import jwt
 import pytest
 from cloudinary.exceptions import Error as CloudinaryError
 from fastapi.testclient import TestClient
@@ -9,13 +11,24 @@ from pymongo.errors import ConnectionFailure, DuplicateKeyError
 from pydantic import SecretStr
 
 import app.main as main
+from app.api import auth as auth_api, auth_dependencies
 from app.api.dependencies import get_database
 from app.core.config import Settings
 from app.database.indexes import AUDIT_LOGS_COLLECTION, GRIEVANCES_COLLECTION
-from app.models.enums import AIProcessingStatus, Priority
+from app.database.indexes import USERS_COLLECTION
+from app.models.enums import AIProcessingStatus, Priority, UserRole
 from app.models.grievance import AISuggestion
 from app.services import document_upload, grievance_management
 from app.services.ai_classification import GeminiClassificationError
+from app.models.user import UserDocument
+from app.models.user import UserCreate
+from app.services.authentication import (
+    AdminAlreadyBootstrappedError,
+    create_access_token,
+    create_first_admin,
+    create_user,
+)
+from app.api.auth_dependencies import get_current_user
 
 
 class MemoryCursor:
@@ -50,6 +63,7 @@ class MemoryCollection:
     ) -> None:
         self.documents = documents
         self.enforce_reference_unique = enforce_reference_unique
+        self.enforce_email_unique = False
         self.duplicate_inserts = 0
         self.insert_error: Exception | None = None
 
@@ -64,6 +78,10 @@ class MemoryCollection:
             for item in self.documents
         ):
             raise DuplicateKeyError("duplicate reference ID")
+        if self.enforce_email_unique and any(
+            item.get("email") == document.get("email") for item in self.documents
+        ):
+            raise DuplicateKeyError("duplicate email")
         self.documents.append(deepcopy(document))
 
     def find_one(
@@ -193,7 +211,9 @@ class MemoryDatabase:
                 enforce_reference_unique=True,
             ),
             AUDIT_LOGS_COLLECTION: MemoryCollection([]),
+            USERS_COLLECTION: MemoryCollection([]),
         }
+        self.collections[USERS_COLLECTION].enforce_email_unique = True
         self.client = MemoryClient(self)
 
     def __getitem__(self, collection_name: str) -> MemoryCollection:
@@ -203,13 +223,27 @@ class MemoryDatabase:
 @pytest.fixture
 def api_client(monkeypatch):
     database = MemoryDatabase()
+    auth_settings = Settings(
+        _env_file=None,
+        jwt_secret_key=SecretStr("synthetic-test-signing-secret-0123456789"),
+    )
+    administrator = UserDocument(
+        name="Test Administrator",
+        email="admin@example.test",
+        password_hash="test-hash",
+        role=UserRole.ADMIN,
+    )
+    database.test_admin_id = administrator.id
     monkeypatch.setattr(main, "get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr(auth_api, "get_settings", lambda: auth_settings)
+    monkeypatch.setattr(auth_dependencies, "get_settings", lambda: auth_settings)
     monkeypatch.setattr(
         grievance_management,
         "get_settings",
         lambda: Settings(_env_file=None),
     )
     main.app.dependency_overrides[get_database] = lambda: database
+    main.app.dependency_overrides[get_current_user] = lambda: administrator
     with TestClient(main.app) as client:
         yield client, database
     main.app.dependency_overrides.clear()
@@ -242,6 +276,35 @@ def configure_cloudinary(monkeypatch) -> None:
         cloudinary_api_secret=SecretStr("synthetic-secret"),
     )
     monkeypatch.setattr(document_upload, "get_settings", lambda: settings)
+
+
+def register_test_user(
+    database: MemoryDatabase,
+    *,
+    name: str,
+    email: str,
+    role: UserRole,
+    department_code: str | None = None,
+) -> UserDocument:
+    return create_user(
+        database,
+        UserCreate(
+            name=name,
+            email=email,
+            password="Synthetic-Password-123",
+            role=role,
+            department_code=department_code,
+        ),
+    )
+
+
+def authenticate_test_user(client: TestClient, email: str) -> str:
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "Synthetic-Password-123"},
+    )
+    assert response.status_code == 200
+    return response.json()["access_token"]
 
 
 def test_submit_creates_grievance_and_audit_event(api_client) -> None:
@@ -425,6 +488,7 @@ def test_upload_document_stores_generated_cloudinary_metadata_and_audit(
     assert uploaded["uploaded_at"]
     assert upload_calls[0][0] == content
     assert upload_calls[0][1]["resource_type"] == "raw"
+    assert upload_calls[0][1]["access_mode"] == "authenticated"
     assert upload_calls[0][1]["overwrite"] is False
     assert upload_calls[0][1]["api_key"] == "synthetic-key"
 
@@ -829,7 +893,8 @@ def test_review_preserves_ai_and_records_officer_changes(api_client) -> None:
     }
     audit = database[AUDIT_LOGS_COLLECTION].documents[-1]
     assert audit["action"] == "grievance.reviewed"
-    assert audit["actor"]["actor_type"] == "officer"
+    assert audit["actor"]["actor_type"] == "admin"
+    assert str(audit["actor"]["actor_id"]) == str(database.test_admin_id)
     assert audit["previous_values"] == {
         "category": "Roads and Infrastructure",
         "subcategory": "Street lighting",
@@ -926,3 +991,340 @@ def test_missing_database_and_mongodb_failures_are_sanitized(api_client) -> None
     unavailable = client.get("/api/v1/grievances")
     assert unavailable.status_code == 503
     assert "Database is unavailable" in unavailable.text
+
+
+def test_public_submission_and_protected_grievance_and_document_endpoints(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, _ = api_client
+    main.app.dependency_overrides.pop(get_current_user)
+
+    submitted = client.post("/api/v1/grievances", json=submission_payload())
+    assert submitted.status_code == 201
+    reference_id = submitted.json()["reference_id"]
+
+    assert client.get("/api/v1/grievances").status_code == 401
+    assert client.get(f"/api/v1/grievances/{reference_id}").status_code == 401
+    assert client.patch(
+        f"/api/v1/grievances/{reference_id}/status",
+        json={"status": "UNDER_REVIEW"},
+    ).status_code == 401
+    assert client.patch(
+        f"/api/v1/grievances/{reference_id}/review",
+        json={"priority": "high"},
+    ).status_code == 401
+    assert client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={"file": ("evidence.pdf", b"%PDF-1.7 data", "application/pdf")},
+    ).status_code == 401
+
+
+def test_login_current_user_and_password_hash_are_not_exposed(api_client) -> None:
+    client, database = api_client
+    main.app.dependency_overrides.pop(get_current_user)
+    user = register_test_user(
+        database,
+        name="Admin User",
+        email="Admin@Example.Test",
+        role=UserRole.ADMIN,
+    )
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.test", "password": "Synthetic-Password-123"},
+    )
+    assert response.status_code == 200
+    token = response.json()["access_token"]
+    assert response.json()["user"]["email"] == "admin@example.test"
+    assert "password" not in response.json()
+    assert "password_hash" not in response.json()
+    stored = database[USERS_COLLECTION].documents[0]
+    assert stored["password_hash"] != "Synthetic-Password-123"
+    assert stored["password_hash"].startswith("$argon2id$")
+
+    current = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert current.status_code == 200
+    assert current.json()["id"] == str(user.id)
+    assert "password_hash" not in current.json()
+
+
+def test_invalid_and_expired_tokens_are_rejected(api_client) -> None:
+    client, database = api_client
+    main.app.dependency_overrides.pop(get_current_user)
+    user = register_test_user(
+        database,
+        name="Admin User",
+        email="admin@example.test",
+        role=UserRole.ADMIN,
+    )
+    settings = auth_api.get_settings()
+    expired = jwt.encode(
+        {
+            "sub": str(user.id),
+            "iss": "creditfix-prototype",
+            "iat": datetime.now(timezone.utc) - timedelta(minutes=10),
+            "exp": datetime.now(timezone.utc) - timedelta(minutes=5),
+        },
+        settings.jwt_secret_key.get_secret_value(),
+        algorithm="HS256",
+    )
+
+    invalid_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": "Bearer not-a-valid-jwt"},
+    )
+    expired_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {expired}"},
+    )
+
+    assert invalid_response.status_code == 401
+    assert expired_response.status_code == 401
+
+
+def test_inactive_accounts_cannot_login_or_use_existing_tokens(api_client) -> None:
+    client, database = api_client
+    main.app.dependency_overrides.pop(get_current_user)
+    user = register_test_user(
+        database,
+        name="Inactive User",
+        email="inactive@example.test",
+        role=UserRole.ADMIN,
+    )
+    token, _ = create_access_token(user, auth_api.get_settings())
+    database[USERS_COLLECTION].documents[0]["is_active"] = False
+
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "inactive@example.test",
+            "password": "Synthetic-Password-123",
+        },
+    )
+    current_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert login_response.status_code == 403
+    assert current_response.status_code == 401
+
+
+def test_admin_can_create_users_but_officers_cannot(api_client) -> None:
+    client, database = api_client
+    main.app.dependency_overrides.pop(get_current_user)
+    administrator = register_test_user(
+        database,
+        name="Admin User",
+        email="admin@example.test",
+        role=UserRole.ADMIN,
+    )
+    admin_token, _ = create_access_token(administrator, auth_api.get_settings())
+    created = client.post(
+        "/api/v1/auth/users",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "name": "Officer One",
+            "email": "officer@example.test",
+            "password": "Synthetic-Password-123",
+            "role": "OFFICER",
+            "department_code": "PWD",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["department"]["code"] == "PWD"
+    assert "password_hash" not in created.json()
+
+    officer = database[USERS_COLLECTION].documents[-1]
+    officer_user = UserDocument.model_validate(officer)
+    officer_token, _ = create_access_token(officer_user, auth_api.get_settings())
+    forbidden = client.post(
+        "/api/v1/auth/users",
+        headers={"Authorization": f"Bearer {officer_token}"},
+        json={
+            "name": "Another Officer",
+            "email": "another@example.test",
+            "password": "Synthetic-Password-123",
+            "role": "OFFICER",
+            "department_code": "PWD",
+        },
+    )
+    duplicate = client.post(
+        "/api/v1/auth/users",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "name": "Duplicate",
+            "email": "OFFICER@example.test",
+            "password": "Synthetic-Password-123",
+            "role": "OFFICER",
+            "department_code": "PWD",
+        },
+    )
+
+    assert forbidden.status_code == 403
+    assert duplicate.status_code == 409
+
+
+def test_invalid_user_password_is_not_reflected_in_validation_response(api_client) -> None:
+    client, _ = api_client
+
+    response = client.post(
+        "/api/v1/auth/users",
+        json={
+            "name": "Weak Password User",
+            "email": "weak@example.test",
+            "password": "weak-secret",
+            "role": "ADMIN",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "weak-secret" not in response.text
+
+
+def test_authentication_configuration_requires_a_long_jwt_secret(api_client, monkeypatch) -> None:
+    client, database = api_client
+    main.app.dependency_overrides.pop(get_current_user)
+    register_test_user(
+        database,
+        name="Admin User",
+        email="admin@example.test",
+        role=UserRole.ADMIN,
+    )
+    short_settings = Settings(
+        _env_file=None,
+        jwt_secret_key=SecretStr("too-short"),
+    )
+    monkeypatch.setattr(auth_api, "get_settings", lambda: short_settings)
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.test", "password": "Synthetic-Password-123"},
+    )
+
+    assert response.status_code == 503
+
+
+def test_officer_access_is_limited_to_department_and_audit_uses_token_identity(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, database = api_client
+    main.app.dependency_overrides.pop(get_current_user)
+    pwd_officer = register_test_user(
+        database,
+        name="PWD Officer",
+        email="pwd@example.test",
+        role=UserRole.OFFICER,
+        department_code="PWD",
+    )
+    wsd_officer = register_test_user(
+        database,
+        name="Water Officer",
+        email="water@example.test",
+        role=UserRole.OFFICER,
+        department_code="WSD",
+    )
+    submitted = submit(client)
+    reference_id = submitted["reference_id"]
+    grievance = database[GRIEVANCES_COLLECTION].documents[0]
+    grievance["recommended_department"] = {
+        "code": "PWD",
+        "name": "Public Works",
+    }
+    pwd_token = authenticate_test_user(client, "pwd@example.test")
+    wsd_token = authenticate_test_user(client, "water@example.test")
+
+    pwd_headers = {"Authorization": f"Bearer {pwd_token}"}
+    wsd_headers = {"Authorization": f"Bearer {wsd_token}"}
+    assert client.get(
+        f"/api/v1/grievances/{reference_id}",
+        headers=pwd_headers,
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/grievances/{reference_id}",
+        headers=wsd_headers,
+    ).status_code == 403
+    assert client.get("/api/v1/grievances?department=PWD", headers=pwd_headers).json()[
+        "total"
+    ] == 1
+    assert client.get(
+        "/api/v1/grievances?department=WSD",
+        headers=pwd_headers,
+    ).status_code == 403
+    assert client.patch(
+        f"/api/v1/grievances/{reference_id}/review",
+        headers=wsd_headers,
+        json={"priority": "high"},
+    ).status_code == 403
+    assert client.patch(
+        f"/api/v1/grievances/{reference_id}/status",
+        headers=wsd_headers,
+        json={"status": "UNDER_REVIEW"},
+    ).status_code == 403
+    assert client.patch(
+        f"/api/v1/grievances/{reference_id}/review",
+        headers=pwd_headers,
+        json={"category": "Water Supply"},
+    ).status_code == 403
+
+    allowed_review = client.patch(
+        f"/api/v1/grievances/{reference_id}/review",
+        headers=pwd_headers,
+        json={"priority": "high"},
+    )
+    assert allowed_review.status_code == 200
+    review_audit = database[AUDIT_LOGS_COLLECTION].documents[-1]
+    assert review_audit["actor"]["actor_type"] == "officer"
+    assert str(review_audit["actor"]["actor_id"]) == str(pwd_officer.id)
+
+    configure_cloudinary(monkeypatch)
+    monkeypatch.setattr(
+        document_upload.cloudinary_uploader,
+        "upload",
+        lambda file, **options: {
+            "public_id": options["public_id"],
+            "secure_url": "https://res.cloudinary.com/test/raw/upload/file.pdf",
+        },
+    )
+    upload_response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        headers=pwd_headers,
+        files={"file": ("evidence.pdf", b"%PDF-1.7 data", "application/pdf")},
+    )
+    assert upload_response.status_code == 201
+    upload_audit = database[AUDIT_LOGS_COLLECTION].documents[-1]
+    assert upload_audit["actor"]["actor_type"] == "officer"
+    assert str(upload_audit["actor"]["actor_id"]) == str(pwd_officer.id)
+    status_response = client.patch(
+        f"/api/v1/grievances/{reference_id}/status",
+        headers=pwd_headers,
+        json={"status": "UNDER_REVIEW"},
+    )
+    assert status_response.status_code == 200
+    status_audit = database[AUDIT_LOGS_COLLECTION].documents[-1]
+    assert status_audit["actor"]["actor_type"] == "officer"
+    assert str(status_audit["actor"]["actor_id"]) == str(pwd_officer.id)
+
+
+def test_only_first_admin_bootstrap_is_allowed(api_client) -> None:
+    _, database = api_client
+    first = create_first_admin(
+        database,
+        "First Admin",
+        "first-admin@example.test",
+        "Synthetic-Password-123",
+    )
+
+    assert first.role is UserRole.ADMIN
+    with pytest.raises(AdminAlreadyBootstrappedError):
+        create_first_admin(
+            database,
+            "Second Admin",
+            "second-admin@example.test",
+            "Synthetic-Password-123",
+        )

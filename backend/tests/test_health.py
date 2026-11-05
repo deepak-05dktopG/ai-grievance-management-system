@@ -12,6 +12,8 @@ from app.database.indexes import (
     AUDIT_LOGS_COLLECTION,
     GRIEVANCE_INDEXES,
     GRIEVANCES_COLLECTION,
+    USER_INDEXES,
+    USERS_COLLECTION,
 )
 
 
@@ -66,6 +68,7 @@ class FakeMongoDatabase:
         self.collections = {
             GRIEVANCES_COLLECTION: FakeMongoCollection(),
             AUDIT_LOGS_COLLECTION: FakeMongoCollection(),
+            USERS_COLLECTION: FakeMongoCollection(),
         }
 
     def __getitem__(self, collection_name: str) -> FakeMongoCollection:
@@ -154,6 +157,9 @@ def test_health_reports_connected_when_ping_succeeds(client_factory) -> None:
     assert clients[0].database.collections[
         AUDIT_LOGS_COLLECTION
     ].created_indexes == list(AUDIT_LOG_INDEXES)
+    assert clients[0].database.collections[USERS_COLLECTION].created_indexes == list(
+        USER_INDEXES
+    )
 
 
 def test_health_reports_unconfigured_database(monkeypatch) -> None:

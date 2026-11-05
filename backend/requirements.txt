@@ -6,6 +6,7 @@ pymongo==4.9.1
 python-dotenv==1.0.1
 python-multipart==0.0.9
 PyJWT==2.9.0
+argon2-cffi==23.1.0
 google-genai>=1.0.0
 cloudinary==1.41.0
 pytest==8.3.3

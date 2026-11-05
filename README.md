@@ -39,6 +39,21 @@ python -m pytest
 ```
 
 Open `http://127.0.0.1:8000/health` to check application and database status.
+Set `JWT_SECRET_KEY` to a randomly generated value of at least 32 characters
+and optionally set `JWT_ACCESS_TOKEN_MINUTES` in `backend/.env`. Generate a
+secret with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+Create the first administrator interactively, without placing the password in
+shell history, with `python -m app.bootstrap_admin` from `backend/`. This command
+only creates an admin when no admin account exists.
+
+Authentication endpoints are `POST /api/v1/auth/login`,
+`GET /api/v1/auth/me`, and admin-only `POST /api/v1/auth/users`. Login returns a
+short-lived JWT. Admins can access all grievances; officers can access only
+grievances whose effective department matches their account. Grievance
+submission remains public, but reading, reviewing, changing status, and
+uploading documents require an authenticated account. There are no citizen
+accounts in this step, so anonymous document uploads are not permitted.
+
 Grievance submission uses Gemini when `GEMINI_API_KEY` is configured. Set
 `GEMINI_MODEL`, `GEMINI_CONFIDENCE_THRESHOLD` (0-1), and `GEMINI_TIMEOUT_MS` in
 `backend/.env` as needed. AI failures, invalid outputs, unsupported categories,
@@ -69,10 +84,9 @@ This project is being implemented incrementally. The current backend provides
 configuration, MongoDB connection lifecycle management, health reporting,
 grievance data models and validation, deterministic illustrative department
 mapping, grievance APIs, Gemini classification, Cloudinary document uploads,
-and collection indexes.
+collection indexes, and JWT authentication with role- and department-based
+access control.
 
-## Prototype API security warning
-The grievance review and status APIs are not authenticated or authorized yet.
-The entire prototype API may expose citizen information and must only be used
-in a trusted local development environment. Do not bind it to a public
-interface or expose it to the internet.
+## Prototype security notice
+This is a prototype and has not undergone production security review. Do not
+bind it to an untrusted public interface or expose it to the internet.

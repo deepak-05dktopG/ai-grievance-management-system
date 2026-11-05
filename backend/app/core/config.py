@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     cloudinary_cloud_name: str = ""
     cloudinary_api_key: SecretStr = SecretStr("")
     cloudinary_api_secret: SecretStr = SecretStr("")
+    jwt_secret_key: SecretStr = SecretStr("")
+    jwt_access_token_minutes: int = Field(default=30, ge=1, le=1440)
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ENV_FILE,
@@ -42,6 +44,10 @@ class Settings(BaseSettings):
             and self.cloudinary_api_key.get_secret_value().strip()
             and self.cloudinary_api_secret.get_secret_value().strip()
         )
+
+    @property
+    def has_jwt_configuration(self) -> bool:
+        return len(self.jwt_secret_key.get_secret_value().strip()) >= 32
 
 
 @lru_cache

@@ -38,6 +38,15 @@ AUDIT_LOG_INDEXES = (
     ),
 )
 
+USERS_COLLECTION = "users"
+
+USER_INDEXES = (
+    (
+        [("email", ASCENDING)],
+        {"name": "uq_user_email", "unique": True},
+    ),
+)
+
 
 def ensure_grievance_indexes(database: Database) -> list[str]:
     collection = database[GRIEVANCES_COLLECTION]
@@ -52,4 +61,12 @@ def ensure_audit_indexes(database: Database) -> list[str]:
     return [
         collection.create_index(keys, **options)
         for keys, options in AUDIT_LOG_INDEXES
+    ]
+
+
+def ensure_user_indexes(database: Database) -> list[str]:
+    collection = database[USERS_COLLECTION]
+    return [
+        collection.create_index(keys, **options)
+        for keys, options in USER_INDEXES
     ]

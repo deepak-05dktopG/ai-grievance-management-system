@@ -7,7 +7,7 @@ from app.models.common import CreatedModel, MongoModel, MongoObjectId
 
 
 class AuditActor(MongoModel):
-    actor_type: Literal["citizen", "officer"]
+    actor_type: Literal["citizen", "officer", "admin"]
     actor_id: MongoObjectId | None = None
 
 

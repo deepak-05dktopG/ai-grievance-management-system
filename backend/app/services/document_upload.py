@@ -17,8 +17,14 @@ from app.database.grievances import (
 )
 from app.models.audit import AuditActor, AuditLogDocument
 from app.models.common import utc_now
+from app.models.enums import UserRole
 from app.models.grievance import DocumentMetadata, GrievanceDocument
-from app.services.grievance_management import GrievanceNotFoundError
+from app.models.user import UserDocument
+from app.services.grievance_management import (
+    GrievanceAccessDeniedError,
+    GrievanceNotFoundError,
+    ensure_grievance_access,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -112,6 +118,7 @@ def upload_supporting_document(
     filename: str | None,
     content_type: str | None,
     content: bytes,
+    actor: UserDocument,
 ) -> DocumentMetadata:
     clean_filename, file_format = _validate_document(filename, content_type, content)
 
@@ -119,6 +126,7 @@ def upload_supporting_document(
     if grievance_document is None:
         raise GrievanceNotFoundError
     grievance = GrievanceDocument.model_validate(grievance_document)
+    ensure_grievance_access(grievance, actor)
 
     settings = get_settings()
     if not settings.has_cloudinary_configuration:
@@ -132,6 +140,7 @@ def upload_supporting_document(
             BytesIO(content),
             public_id=public_id,
             resource_type="raw",
+            access_mode="authenticated",
             overwrite=False,
             filename=f"{generated_name}.{file_format}",
             **cloudinary_options,
@@ -192,7 +201,14 @@ def upload_supporting_document(
                     grievance_id=grievance.id,
                     reference_id=reference_id,
                     action="grievance.document_uploaded",
-                    actor=AuditActor(actor_type="citizen"),
+                    actor=AuditActor(
+                        actor_type=(
+                            "admin"
+                            if actor.role is UserRole.ADMIN
+                            else "officer"
+                        ),
+                        actor_id=actor.id,
+                    ),
                     new_values={
                         "cloudinary_public_id": metadata.cloudinary_public_id,
                         "format": metadata.format,

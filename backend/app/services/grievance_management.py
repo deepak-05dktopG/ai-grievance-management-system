@@ -15,8 +15,9 @@ from app.database.grievances import (
 )
 from app.models.audit import AuditActor, AuditLogDocument
 from app.models.common import utc_now
-from app.models.enums import AIProcessingStatus, GrievanceStatus
+from app.models.enums import AIProcessingStatus, GrievanceStatus, UserRole
 from app.models.grievance import GrievanceDocument, OfficerApprovedValues
+from app.models.user import UserDocument
 from app.schemas.grievance import (
     GrievanceCreateRequest,
     GrievanceResponse,
@@ -79,6 +80,28 @@ class InvalidDepartmentError(Exception):
     pass
 
 
+class GrievanceAccessDeniedError(Exception):
+    pass
+
+
+def ensure_grievance_access(
+    grievance: GrievanceDocument,
+    actor: UserDocument,
+) -> None:
+    if actor.role is UserRole.ADMIN:
+        return
+    if actor.role is not UserRole.OFFICER or actor.department is None:
+        raise GrievanceAccessDeniedError
+    department = (
+        grievance.officer_approved.department
+        if grievance.officer_approved is not None
+        and grievance.officer_approved.department is not None
+        else grievance.recommended_department
+    )
+    if department is None or department.code != actor.department.code:
+        raise GrievanceAccessDeniedError
+
+
 def _insert_audit_event(
     database: Database,
     *,
@@ -88,7 +111,8 @@ def _insert_audit_event(
         "grievance.reviewed",
         "grievance.status_changed",
     ],
-    actor_type: Literal["citizen", "officer"],
+    actor_type: Literal["citizen", "officer", "admin"],
+    actor: UserDocument | None = None,
     new_values: dict[str, Any],
     previous_values: dict[str, Any] | None = None,
     session: Any,
@@ -97,7 +121,10 @@ def _insert_audit_event(
         grievance_id=grievance.id,
         reference_id=grievance.reference_id,
         action=action,
-        actor=AuditActor(actor_type=actor_type),
+        actor=AuditActor(
+            actor_type=actor_type,
+            actor_id=actor.id if actor is not None else None,
+        ),
         previous_values=previous_values,
         new_values=new_values,
     )
@@ -178,11 +205,14 @@ def create_grievance(
 def get_grievance_by_reference(
     database: Database,
     reference_id: str,
+    actor: UserDocument,
 ) -> GrievanceDocument:
     document = get_grievance(database, reference_id)
     if document is None:
         raise GrievanceNotFoundError
-    return GrievanceDocument.model_validate(document)
+    grievance = GrievanceDocument.model_validate(document)
+    ensure_grievance_access(grievance, actor)
+    return grievance
 
 
 def _effective_priority_query(priority: str) -> dict[str, Any]:
@@ -246,6 +276,7 @@ def review_grievance(
     database: Database,
     reference_id: str,
     request: GrievanceReviewRequest,
+    actor: UserDocument,
 ) -> GrievanceDocument:
     session = database.client.start_session()
     with session:
@@ -254,6 +285,7 @@ def review_grievance(
             if document is None:
                 raise GrievanceNotFoundError
             grievance = GrievanceDocument.model_validate(document)
+            ensure_grievance_access(grievance, actor)
             existing = grievance.officer_approved
             values = (
                 existing.model_dump(mode="python")
@@ -295,6 +327,20 @@ def review_grievance(
                 )
 
             approved = OfficerApprovedValues.model_validate(values)
+            target_department = (
+                approved.department
+                if approved.department is not None
+                else grievance.recommended_department
+            )
+            if (
+                actor.role is UserRole.OFFICER
+                and (
+                    actor.department is None
+                    or target_department is None
+                    or target_department.code != actor.department.code
+                )
+            ):
+                raise GrievanceAccessDeniedError
             approved_data = approved.model_dump(mode="python", exclude_none=True)
             now = utc_now()
             result = update_grievance(
@@ -331,7 +377,10 @@ def review_grievance(
                 database,
                 grievance=grievance,
                 action="grievance.reviewed",
-                actor_type="officer",
+                actor_type=(
+                    "admin" if actor.role is UserRole.ADMIN else "officer"
+                ),
+                actor=actor,
                 previous_values=previous_values,
                 new_values=approved.model_dump(mode="json", exclude_none=True),
                 session=session,
@@ -346,6 +395,7 @@ def update_grievance_status(
     database: Database,
     reference_id: str,
     request: GrievanceStatusUpdateRequest,
+    actor: UserDocument,
 ) -> GrievanceDocument:
     session = database.client.start_session()
     with session:
@@ -354,6 +404,7 @@ def update_grievance_status(
             if document is None:
                 raise GrievanceNotFoundError
             grievance = GrievanceDocument.model_validate(document)
+            ensure_grievance_access(grievance, actor)
             if request.status not in ALLOWED_STATUS_TRANSITIONS[grievance.status]:
                 raise InvalidStatusTransitionError
 
@@ -372,7 +423,10 @@ def update_grievance_status(
                 database,
                 grievance=grievance,
                 action="grievance.status_changed",
-                actor_type="officer",
+                actor_type=(
+                    "admin" if actor.role is UserRole.ADMIN else "officer"
+                ),
+                actor=actor,
                 previous_values={"status": grievance.status.value},
                 new_values={"status": request.status.value},
                 session=session,

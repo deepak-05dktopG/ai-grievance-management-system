@@ -12,9 +12,11 @@ from fastapi import (
 )
 from pymongo.database import Database
 
+from app.api.auth_dependencies import get_current_user
 from app.api.dependencies import get_database
-from app.models.enums import GrievanceStatus, Priority
+from app.models.enums import GrievanceStatus, Priority, UserRole
 from app.models.grievance import DocumentMetadata, GrievanceDocument
+from app.models.user import UserDocument
 from app.schemas.grievance import (
     GrievanceCreateRequest,
     GrievanceListResponse,
@@ -24,6 +26,7 @@ from app.schemas.grievance import (
 )
 from app.services.grievance_management import (
     MAX_PAGE_SIZE,
+    GrievanceAccessDeniedError,
     GrievanceNotFoundError,
     InvalidDepartmentError,
     InvalidStatusTransitionError,
@@ -86,6 +89,7 @@ def submit_grievance(
 @router.get("", response_model=GrievanceListResponse)
 def list_grievances(
     database: Annotated[Database, Depends(get_database)],
+    current_user: Annotated[UserDocument, Depends(get_current_user)],
     page: Annotated[int, Query(ge=1, le=1_000_000)] = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 20,
     grievance_status: Annotated[
@@ -103,6 +107,21 @@ def list_grievances(
     ] = None,
     priority: Priority | None = None,
 ) -> GrievanceListResponse:
+    if current_user.role is UserRole.OFFICER:
+        if current_user.department is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Officer department is not configured",
+            )
+        if (
+            department is not None
+            and department.upper() != current_user.department.code
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Grievances outside your department are not accessible",
+            )
+        department = current_user.department.code
     result = list_grievance_page(
         database,
         page=page,
@@ -118,11 +137,17 @@ def list_grievances(
 def get_grievance(
     reference_id: ReferenceId,
     database: Annotated[Database, Depends(get_database)],
+    current_user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> GrievanceDocument:
     try:
-        return get_grievance_by_reference(database, reference_id)
+        return get_grievance_by_reference(database, reference_id, current_user)
     except GrievanceNotFoundError:
         raise _not_found() from None
+    except GrievanceAccessDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Grievance is outside your department",
+        ) from None
 
 
 @router.patch(
@@ -133,11 +158,17 @@ def review_grievance_endpoint(
     request: GrievanceReviewRequest,
     reference_id: ReferenceId,
     database: Annotated[Database, Depends(get_database)],
+    current_user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> GrievanceDocument:
     try:
-        return review_grievance(database, reference_id, request)
+        return review_grievance(database, reference_id, request, current_user)
     except GrievanceNotFoundError:
         raise _not_found() from None
+    except GrievanceAccessDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Grievance is outside your department",
+        ) from None
     except InvalidDepartmentError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -153,11 +184,17 @@ def update_status(
     request: GrievanceStatusUpdateRequest,
     reference_id: ReferenceId,
     database: Annotated[Database, Depends(get_database)],
+    current_user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> GrievanceDocument:
     try:
-        return update_grievance_status(database, reference_id, request)
+        return update_grievance_status(database, reference_id, request, current_user)
     except GrievanceNotFoundError:
         raise _not_found() from None
+    except GrievanceAccessDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Grievance is outside your department",
+        ) from None
     except InvalidStatusTransitionError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -173,6 +210,7 @@ def update_status(
 async def upload_document(
     reference_id: ReferenceId,
     database: Annotated[Database, Depends(get_database)],
+    current_user: Annotated[UserDocument, Depends(get_current_user)],
     file: UploadFile = File(...),
 ) -> DocumentMetadata:
     content = await file.read(5 * 1024 * 1024 + 1)
@@ -183,6 +221,7 @@ async def upload_document(
             filename=file.filename,
             content_type=file.content_type,
             content=content,
+            actor=current_user,
         )
     except DocumentTooLargeError:
         raise HTTPException(
@@ -196,6 +235,11 @@ async def upload_document(
         ) from None
     except GrievanceNotFoundError:
         raise _not_found() from None
+    except GrievanceAccessDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Grievance is outside your department",
+        ) from None
     except DocumentUploadConfigurationError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

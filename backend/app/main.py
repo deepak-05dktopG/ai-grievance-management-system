@@ -2,15 +2,21 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi import Request
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
+from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.core.config import get_settings
-from app.database.indexes import ensure_audit_indexes, ensure_grievance_indexes
+from app.database.indexes import (
+    ensure_audit_indexes,
+    ensure_grievance_indexes,
+    ensure_user_indexes,
+)
 from app.database.mongo import create_mongo_client, ping_mongo
 from app.api.grievances import router as grievances_router
 
@@ -41,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ping_mongo(client)
         ensure_grievance_indexes(app.state.mongodb_database)
         ensure_audit_indexes(app.state.mongodb_database)
+        ensure_user_indexes(app.state.mongodb_database)
     except (PyMongoError, ValueError) as exc:
         app.state.mongodb_status = "unavailable"
         logger.error(
@@ -80,14 +87,31 @@ app = FastAPI(
         {
             "name": "grievances",
             "description": (
-                "Prototype-only APIs. Review and status endpoints are not "
-                "authenticated and must not be exposed publicly."
+                "Grievance submission is public. Read, review, status, and "
+                "document endpoints require authentication and department access."
             ),
-        }
+        },
+        {"name": "authentication", "description": "JWT login and user management."},
     ],
 )
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(grievances_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    errors = exc.errors()
+    for error in errors:
+        if "password" in error.get("loc", ()):
+            error.pop("input", None)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": jsonable_encoder(errors)},
+    )
 
 
 @app.exception_handler(PyMongoError)

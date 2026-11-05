@@ -21,3 +21,8 @@ class AIProcessingStatus(StrEnum):
     PENDING = "pending"
     COMPLETED = "completed"
     MANUAL_REVIEW = "manual_review"
+
+
+class UserRole(StrEnum):
+    ADMIN = "ADMIN"
+    OFFICER = "OFFICER"
