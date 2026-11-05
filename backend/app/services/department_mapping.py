@@ -50,12 +50,22 @@ _CATEGORY_TO_DEPARTMENT = {
     for department in ILLUSTRATIVE_DEPARTMENTS
     for category in department.supported_categories
 }
+_DEPARTMENT_BY_CODE = {
+    department.code.casefold(): department for department in ILLUSTRATIVE_DEPARTMENTS
+}
 
 
 def recommend_department(category: str | None) -> DepartmentReference | None:
     if category is None or not category.strip():
         return None
     department = _CATEGORY_TO_DEPARTMENT.get(_normalize_category(category))
+    if department is None:
+        return None
+    return DepartmentReference(code=department.code, name=department.name)
+
+
+def get_department_by_code(code: str) -> DepartmentReference | None:
+    department = _DEPARTMENT_BY_CODE.get(code.strip().casefold())
     if department is None:
         return None
     return DepartmentReference(code=department.code, name=department.name)

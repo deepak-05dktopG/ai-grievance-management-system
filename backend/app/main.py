@@ -3,13 +3,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi import Request
+from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 from app.api.health import router as health_router
 from app.core.config import get_settings
-from app.database.indexes import ensure_grievance_indexes
+from app.database.indexes import ensure_audit_indexes, ensure_grievance_indexes
 from app.database.mongo import create_mongo_client, ping_mongo
+from app.api.grievances import router as grievances_router
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.mongodb_database = client[settings.mongodb_db_name]
         ping_mongo(client)
         ensure_grievance_indexes(app.state.mongodb_database)
+        ensure_audit_indexes(app.state.mongodb_database)
     except (PyMongoError, ValueError) as exc:
         app.state.mongodb_status = "unavailable"
         logger.error(
@@ -69,5 +73,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
 
 
-app = FastAPI(title="Creditfix API", lifespan=lifespan)
+app = FastAPI(
+    title="Creditfix API",
+    lifespan=lifespan,
+    openapi_tags=[
+        {
+            "name": "grievances",
+            "description": (
+                "Prototype-only APIs. Review and status endpoints are not "
+                "authenticated and must not be exposed publicly."
+            ),
+        }
+    ],
+)
 app.include_router(health_router)
+app.include_router(grievances_router)
+
+
+@app.exception_handler(PyMongoError)
+async def handle_mongodb_error(
+    request: Request,
+    exc: PyMongoError,
+) -> JSONResponse:
+    logger.error(
+        "MongoDB request failed",
+        extra={
+            "event": "mongodb_request_failed",
+            "path": request.url.path,
+            "error_type": type(exc).__name__,
+        },
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database operation failed"},
+    )

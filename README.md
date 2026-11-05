@@ -53,5 +53,11 @@ npm run dev
 This project is being implemented incrementally. The current backend provides
 configuration, MongoDB connection lifecycle management, health reporting,
 grievance data models and validation, deterministic illustrative department
-mapping, and grievance collection indexes. No grievance API or AI integration
-is implemented yet.
+mapping, grievance APIs, and collection indexes. Gemini integration is not
+implemented yet.
+
+## Prototype API security warning
+The grievance review and status APIs are not authenticated or authorized yet.
+The entire prototype API may expose citizen information and must only be used
+in a trusted local development environment. Do not bind it to a public
+interface or expose it to the internet.

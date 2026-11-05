@@ -61,3 +61,12 @@ class TimestampedModel(MongoModel):
     @classmethod
     def timestamps_are_utc(cls, value: datetime) -> datetime:
         return _as_utc(value)
+
+
+class CreatedModel(MongoModel):
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("created_at")
+    @classmethod
+    def created_at_is_utc(cls, value: datetime) -> datetime:
+        return _as_utc(value)

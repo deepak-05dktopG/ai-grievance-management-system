@@ -7,7 +7,12 @@ from pydantic import SecretStr
 
 import app.main as main
 from app.core.config import Settings
-from app.database.indexes import GRIEVANCE_INDEXES, GRIEVANCES_COLLECTION
+from app.database.indexes import (
+    AUDIT_LOG_INDEXES,
+    AUDIT_LOGS_COLLECTION,
+    GRIEVANCE_INDEXES,
+    GRIEVANCES_COLLECTION,
+)
 
 
 class FakeMongoAdmin:
@@ -58,11 +63,13 @@ class FakeMongoCollection:
 
 class FakeMongoDatabase:
     def __init__(self) -> None:
-        self.collection = FakeMongoCollection()
+        self.collections = {
+            GRIEVANCES_COLLECTION: FakeMongoCollection(),
+            AUDIT_LOGS_COLLECTION: FakeMongoCollection(),
+        }
 
     def __getitem__(self, collection_name: str) -> FakeMongoCollection:
-        assert collection_name == GRIEVANCES_COLLECTION
-        return self.collection
+        return self.collections[collection_name]
 
 
 @pytest.fixture
@@ -141,7 +148,12 @@ def test_health_reports_connected_when_ping_succeeds(client_factory) -> None:
     assert len(clients) == 1
     assert clients[0].admin.calls == 2
     assert clients[0].database_name == "creditfix_test"
-    assert clients[0].database.collection.created_indexes == list(GRIEVANCE_INDEXES)
+    assert clients[0].database.collections[
+        GRIEVANCES_COLLECTION
+    ].created_indexes == list(GRIEVANCE_INDEXES)
+    assert clients[0].database.collections[
+        AUDIT_LOGS_COLLECTION
+    ].created_indexes == list(AUDIT_LOG_INDEXES)
 
 
 def test_health_reports_unconfigured_database(monkeypatch) -> None:

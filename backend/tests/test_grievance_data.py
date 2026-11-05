@@ -6,7 +6,14 @@ import pytest
 from bson import BSON, ObjectId
 from pydantic import ValidationError
 
-from app.database.indexes import ensure_grievance_indexes
+from app.database.indexes import (
+    AUDIT_LOG_INDEXES,
+    AUDIT_LOGS_COLLECTION,
+    GRIEVANCE_INDEXES,
+    GRIEVANCES_COLLECTION,
+    ensure_audit_indexes,
+    ensure_grievance_indexes,
+)
 from app.models.enums import GrievanceStatus, Priority
 from app.models.grievance import (
     AISuggestion,
@@ -203,11 +210,13 @@ class FakeIndexCollection:
 
 class FakeIndexDatabase:
     def __init__(self) -> None:
-        self.collection = FakeIndexCollection()
+        self.collections = {
+            GRIEVANCES_COLLECTION: FakeIndexCollection(),
+            AUDIT_LOGS_COLLECTION: FakeIndexCollection(),
+        }
 
     def __getitem__(self, collection_name: str) -> FakeIndexCollection:
-        assert collection_name == "grievances"
-        return self.collection
+        return self.collections[collection_name]
 
 
 def test_grievance_indexes_include_unique_reference_and_filter_indexes() -> None:
@@ -219,13 +228,31 @@ def test_grievance_indexes_include_unique_reference_and_filter_indexes() -> None
         "uq_grievance_reference_id",
         "ix_grievance_status",
         "ix_grievance_recommended_department",
+        "ix_grievance_approved_department",
+        "ix_grievance_suggested_priority",
+        "ix_grievance_approved_priority",
         "ix_grievance_created_at",
     ]
-    assert database.collection.created[0][1]["unique"] is True
-    assert database.collection.created[0][0] == [("reference_id", 1)]
-    assert database.collection.created[1][0] == [("status", 1)]
-    assert database.collection.created[2][0] == [("recommended_department.code", 1)]
-    assert database.collection.created[3][0] == [("created_at", -1)]
+    indexes = database.collections[GRIEVANCES_COLLECTION].created
+    assert indexes[0][1]["unique"] is True
+    assert indexes[0][0] == [("reference_id", 1)]
+    assert indexes[1][0] == [("status", 1)]
+    assert indexes[2][0] == [("recommended_department.code", 1)]
+    assert indexes[3][0] == [("officer_approved.department.code", 1)]
+    assert indexes[4][0] == [("ai_suggestion.suggested_priority", 1)]
+    assert indexes[5][0] == [("officer_approved.priority", 1)]
+    assert indexes[6][0] == [("created_at", -1)]
+
+
+def test_audit_log_indexes_support_reference_history() -> None:
+    database = FakeIndexDatabase()
+
+    names = ensure_audit_indexes(database)  # type: ignore[arg-type]
+
+    assert names == ["ix_audit_reference_created"]
+    assert database.collections[AUDIT_LOGS_COLLECTION].created == list(
+        AUDIT_LOG_INDEXES
+    )
 
 
 def test_officer_approved_fields_remain_separate_from_ai_suggestions() -> None:
