@@ -1,3 +1,6 @@
+"""MongoDB collection names and index creation used during API startup."""
+# Indexes are created by the API startup command: python -m uvicorn app.main:app --reload.
+
 from pymongo import ASCENDING, DESCENDING
 from pymongo.database import Database
 
@@ -49,6 +52,11 @@ USER_INDEXES = (
 
 
 def ensure_grievance_indexes(database: Database) -> list[str]:
+    """Create each configured grievance index and return the resulting names.
+
+    The unique reference index prevents duplicate public IDs; the remaining
+    indexes support common status, department, priority, and date queries.
+    """
     collection = database[GRIEVANCES_COLLECTION]
     return [
         collection.create_index(keys, **options)
@@ -57,6 +65,7 @@ def ensure_grievance_indexes(database: Database) -> list[str]:
 
 
 def ensure_audit_indexes(database: Database) -> list[str]:
+    """Index audit lookup by grievance reference and event time."""
     collection = database[AUDIT_LOGS_COLLECTION]
     return [
         collection.create_index(keys, **options)
@@ -65,6 +74,7 @@ def ensure_audit_indexes(database: Database) -> list[str]:
 
 
 def ensure_user_indexes(database: Database) -> list[str]:
+    """Create the unique normalized-email index used by login and account creation."""
     collection = database[USERS_COLLECTION]
     return [
         collection.create_index(keys, **options)

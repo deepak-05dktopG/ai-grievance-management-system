@@ -1,0 +1,1 @@
+"""Backend application package; start the API from backend with: python -m uvicorn app.main:app --reload."""

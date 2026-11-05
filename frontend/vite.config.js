@@ -1,3 +1,5 @@
+// Vite/React dev-server configuration; from frontend run `npm run dev` or `npm run build`.
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 

@@ -1,3 +1,5 @@
+"""Authentication API routes; run the API from backend with: python -m uvicorn app.main:app --reload."""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -27,6 +29,13 @@ def login(
     request: LoginRequest,
     database: Annotated[Database, Depends(get_database)],
 ) -> LoginResponse:
+    """Log in a user and return the token plus the public account profile.
+
+    Steps: find the normalized email, verify its Argon2 password hash, reject
+    inactive accounts, sign a short-lived JWT, then map expected authentication
+    failures to safe HTTP responses. The raw password and stored hash are never
+    included in the response.
+    """
     try:
         user = authenticate_user(
             database,
@@ -61,6 +70,7 @@ def login(
 def current_user(
     user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> UserResponse:
+    """Return only the public fields of the account resolved from the JWT."""
     return UserResponse.from_user(user)
 
 
@@ -74,6 +84,13 @@ def create_user_endpoint(
     database: Annotated[Database, Depends(get_database)],
     _administrator: Annotated[UserDocument, Depends(require_admin)],
 ) -> UserResponse:
+    """Create an account for an authenticated administrator.
+
+    FastAPI first resolves ``require_admin`` and validates ``UserCreate``.
+    The service then resolves the department, hashes the password, and inserts
+    the account; duplicate emails and invalid departments become client-safe
+    conflict or validation responses.
+    """
     try:
         user = create_user(database, request)
     except UserAlreadyExistsError:

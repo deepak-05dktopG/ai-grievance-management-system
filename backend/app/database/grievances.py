@@ -1,3 +1,6 @@
+"""MongoDB grievance and audit persistence used by the management services."""
+# Exercise through the API: python -m uvicorn app.main:app --reload (from backend).
+
 from datetime import datetime
 from typing import Any
 
@@ -9,6 +12,11 @@ from app.models.enums import GrievanceStatus
 
 
 def insert_grievance(database: Database, document: dict[str, Any], session: Any) -> None:
+    """Write a grievance inside the caller's transaction.
+
+    Keeping transaction ownership in the service lets the case insert and
+    corresponding audit insert succeed or roll back as one unit.
+    """
     database[GRIEVANCES_COLLECTION].insert_one(document, session=session)
 
 
@@ -17,6 +25,7 @@ def get_grievance(
     reference_id: str,
     session: Any = None,
 ) -> dict[str, Any] | None:
+    """Find one case by its public reference, optionally in a transaction session."""
     return database[GRIEVANCES_COLLECTION].find_one(
         {"reference_id": reference_id},
         session=session,
@@ -24,6 +33,7 @@ def get_grievance(
 
 
 def get_audit_logs(database: Database, reference_id: str) -> list[dict[str, Any]]:
+    """Load one case's audit trail from oldest to newest for chronological display."""
     return list(
         database[AUDIT_LOGS_COLLECTION]
         .find({"reference_id": reference_id})
@@ -38,6 +48,11 @@ def list_grievances(
     skip: int,
     limit: int,
 ) -> tuple[list[dict[str, Any]], int]:
+    """Count matches, then fetch the requested newest-first page.
+
+    Returning the page and total together lets the service build pagination
+    metadata without duplicating MongoDB query construction in the API route.
+    """
     collection = database[GRIEVANCES_COLLECTION]
     total = collection.count_documents(query)
     documents = list(
@@ -57,6 +72,11 @@ def update_grievance(
     session: Any,
     expected_status: GrievanceStatus | None = None,
 ) -> UpdateResult:
+    """Apply field updates, optionally requiring the stored status to still match.
+
+    The expected-status predicate makes status transitions conditional, so a
+    concurrent update cannot silently overwrite a newer workflow state.
+    """
     query: dict[str, Any] = {"reference_id": reference_id}
     if expected_status is not None:
         query["status"] = expected_status.value
@@ -75,6 +95,7 @@ def append_supporting_document(
     updated_at: datetime,
     session: Any,
 ) -> UpdateResult:
+    """Append one document record and advance the grievance's update timestamp."""
     return database[GRIEVANCES_COLLECTION].update_one(
         {"reference_id": reference_id},
         {
@@ -90,4 +111,5 @@ def insert_audit_log(
     document: dict[str, Any],
     session: Any,
 ) -> None:
+    """Insert an audit event in the same transaction as its related case change."""
     database[AUDIT_LOGS_COLLECTION].insert_one(document, session=session)

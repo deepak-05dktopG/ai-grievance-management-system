@@ -1,3 +1,5 @@
+// Case details, review, status, and audit UI; run from frontend with `npm run dev`.
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Alert from '../../components/Alert';
@@ -50,6 +52,7 @@ export default function GrievanceDetails() {
   const canEdit = user?.role === 'ADMIN' || user?.role === 'OFFICER';
 
   const loadGrievance = useCallback(async () => {
+    // Load case data and its audit history independently so audit failures are visible.
     setLoading(true);
     setError('');
     try {
@@ -91,6 +94,7 @@ export default function GrievanceDetails() {
   }), [grievance]);
 
   async function saveReview(event) {
+    // Save human-approved values separately and refresh the audit trail.
     event.preventDefault();
     setSavingReview(true);
     setError('');
@@ -115,6 +119,7 @@ export default function GrievanceDetails() {
   }
 
   async function refreshAuditOnly() {
+    // Preserve the case view if audit retrieval is unavailable.
     try {
       const { data } = await grievanceApi.audit(referenceId);
       setAudit(data);
@@ -125,6 +130,7 @@ export default function GrievanceDetails() {
   }
 
   async function updateStatus(nextStatus) {
+    // Ask the backend to validate the requested workflow transition.
     setSavingStatus(true);
     setError('');
     setSuccess('');

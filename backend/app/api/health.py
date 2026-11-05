@@ -1,3 +1,5 @@
+"""Health endpoint; check it at http://127.0.0.1:8000/health while the API runs."""
+
 import logging
 from typing import Any
 
@@ -15,6 +17,12 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health", response_model=None)
 def health_check(request: Request) -> dict[str, str] | JSONResponse:
+    """Report API readiness and the latest MongoDB connectivity check.
+
+    If no client was configured, return a degraded 503 immediately. Otherwise
+    ping MongoDB, update the shared status used by startup state, and return
+    either a healthy response or a sanitized degraded response.
+    """
     client: Any = request.app.state.mongodb_client
     if client is None:
         database_status = request.app.state.mongodb_status

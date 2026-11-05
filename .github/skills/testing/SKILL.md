@@ -51,7 +51,7 @@ Test:
 - Ambiguous complaints.
 - Malformed JSON.
 - Prompt injection.
-- Gemini API failures.
+- Groq API failures.
 
 Use a predefined set of synthetic grievances and expected outcomes.
 
@@ -73,7 +73,7 @@ Verify the complete workflow:
 1. Citizen submits grievance.
 2. Backend creates a case.
 3. Documents upload to Cloudinary.
-4. Gemini processes the grievance.
+4. Groq processes the grievance.
 5. Department mapping runs.
 6. Officer reviews the suggestion.
 7. Officer updates the case.

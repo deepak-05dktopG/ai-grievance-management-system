@@ -14,7 +14,7 @@ The application consists of:
 2. FastAPI backend.
 3. MongoDB Atlas database.
 4. Cloudinary document storage.
-5. Gemini AI integration.
+5. Groq AI integration.
 
 ## Main Modules
 
@@ -60,7 +60,7 @@ The application consists of:
 Citizen Submission
 → Backend Validation
 → MongoDB Case Creation
-→ Gemini Classification
+→ Groq Classification
 → Structured Output Validation
 → Department Mapping
 → Officer Review

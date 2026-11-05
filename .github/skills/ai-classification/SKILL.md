@@ -1,14 +1,14 @@
 
 ---
 name: ai-classification
-description: Defines Gemini-based grievance classification, summarization, structured outputs, confidence handling, deterministic routing and human review.
+description: Defines Groq-based grievance classification, summarization, structured outputs, confidence handling, deterministic routing and human review.
 ---
 
 # AI Classification Skill
 
 ## AI Provider
 
-Use Google Gemini API through the FastAPI backend.
+Use Groq's OpenAI-compatible API through the FastAPI backend.
 
 ## Classification Responsibilities
 
@@ -67,7 +67,7 @@ The officer must review the recommendation before final assignment.
 
 ## Failure Handling
 
-If Gemini fails:
+If Groq fails:
 - Do not fabricate AI results.
 - Preserve the submitted grievance.
 - Mark AI processing as failed or pending.

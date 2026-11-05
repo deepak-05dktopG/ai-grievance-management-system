@@ -1,3 +1,5 @@
+// Axios API clients and token handling; configure VITE_API_BASE_URL, then run `npm run dev`.
+
 import axios from 'axios';
 
 const TOKEN_KEY = 'creditfix_access_token';
@@ -26,6 +28,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // An expired session should not leave protected dashboard routes open.
     if (error.response?.status === 401) {
       setAccessToken(null);
       if (window.location.pathname.startsWith('/dashboard')) {
@@ -37,6 +40,7 @@ api.interceptors.response.use(
 );
 
 export function getErrorMessage(error) {
+  // Convert API failures into a user-facing message without exposing internals.
   const status = error.response?.status;
   if (status === 401) return 'Your session expired or your credentials are invalid. Please sign in again.';
   if (status === 403) return 'You do not have permission to perform this action.';
@@ -48,7 +52,8 @@ export function getErrorMessage(error) {
 }
 
 export const grievanceApi = {
-  submit: (payload) => api.post('/api/v1/grievances', payload),
+  // Citizen, officer, and admin grievance endpoint wrappers.
+  submit: (payload) => api.post('/api/v1/grievances', payload, { timeout: 65000 }),
   list: (params) => api.get('/api/v1/grievances', { params }),
   get: (referenceId) => api.get(`/api/v1/grievances/${encodeURIComponent(referenceId)}`),
   track: (referenceId, token) =>
@@ -77,6 +82,7 @@ export const grievanceApi = {
 };
 
 export const authApi = {
+  // Staff authentication and administrator account-creation wrappers.
   login: (email, password) =>
     api.post('/api/v1/auth/login', { email, password }),
   me: () => api.get('/api/v1/auth/me'),

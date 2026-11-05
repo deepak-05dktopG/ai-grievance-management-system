@@ -1,3 +1,5 @@
+// Staff login page; run from frontend with `npm run dev`.
+
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Alert from '../../components/Alert';
@@ -18,6 +20,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(event) {
+    // Authenticate through the shared context, then open the protected dashboard.
     event.preventDefault();
     setError('');
     setLoading(true);

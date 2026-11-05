@@ -1,3 +1,5 @@
+"""JWT and role dependencies; routes are served by: python -m uvicorn app.main:app --reload."""
+
 from typing import Annotated
 from dataclasses import dataclass
 
@@ -28,6 +30,8 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 @dataclass(frozen=True)
 class DocumentUploader:
+    """Carry the already-authorized staff or citizen identity into upload logic."""
+
     actor: UserDocument | None = None
     citizen_access_token: str | None = None
 
@@ -36,6 +40,12 @@ def _resolve_credentials(
     database: Database,
     credentials: HTTPAuthorizationCredentials | None,
 ) -> UserDocument:
+    """Convert a bearer credential into the active user used by a route.
+
+    Steps: require the Bearer scheme, verify the JWT signature and claims,
+    load the referenced account, then reject missing or inactive users with
+    authentication errors that do not reveal token details.
+    """
     if credentials is None or credentials.scheme.casefold() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -65,6 +75,12 @@ def get_current_user(
         Depends(bearer_scheme),
     ],
 ) -> UserDocument:
+    """Resolve the request's bearer token to an active user document.
+
+    The route receives only the database and parsed Authorization header here;
+    token validation, account lookup, and HTTP error mapping stay centralized
+    in ``_resolve_credentials``.
+    """
     return _resolve_credentials(database, credentials)
 
 
@@ -80,6 +96,12 @@ def get_document_uploader(
         Header(alias="X-Citizen-Access-Token"),
     ] = None,
 ) -> DocumentUploader:
+    """Resolve the identity allowed to attach a document to this grievance.
+
+    A staff Bearer token is resolved to an active user; otherwise the dedicated
+    citizen token is checked against this reference ID and its expiry. Returning
+    one typed identity prevents the upload service from trusting client roles.
+    """
     if credentials is not None:
         return DocumentUploader(actor=_resolve_credentials(database, credentials))
     if not citizen_access_token:
@@ -106,6 +128,11 @@ def get_document_uploader(
 def require_admin(
     current_user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> UserDocument:
+    """Allow an account-management route only for an authenticated administrator.
+
+    The current user comes from the JWT dependency; role information in the
+    request body is never used to grant access.
+    """
     if current_user.role is not UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

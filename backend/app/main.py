@@ -1,3 +1,5 @@
+"""FastAPI application setup; run from backend with: python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000."""
+
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -5,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
@@ -26,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Own the MongoDB client's startup, readiness, and shutdown lifecycle.
+
+    Startup reads settings, initializes app state, connects and pings MongoDB,
+    and creates required indexes. If Mongo is unavailable, the API still starts
+    in a degraded state so health checks can explain the dependency failure.
+    The ``finally`` block closes any created client when the server stops.
+    """
     settings = get_settings()
     app.state.mongodb_client = None
     app.state.mongodb_database = None
@@ -94,6 +104,20 @@ app = FastAPI(
         {"name": "authentication", "description": "JWT login and user management."},
     ],
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Citizen-Access-Token",
+    ],
+)
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(grievances_router)
@@ -104,6 +128,12 @@ async def handle_request_validation_error(
     request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
+    """Return FastAPI validation errors without reflecting submitted passwords.
+
+    FastAPI's error objects can include the rejected input value. Remove that
+    value specifically for password fields, then JSON-encode the remaining
+    field locations and messages for the standard 422 response.
+    """
     errors = exc.errors()
     for error in errors:
         if "password" in error.get("loc", ()):
@@ -119,6 +149,11 @@ async def handle_mongodb_error(
     request: Request,
     exc: PyMongoError,
 ) -> JSONResponse:
+    """Log a sanitized database failure and return a stable 503 response.
+
+    Keep the request path and exception class for operations, but never send
+    the driver's potentially sensitive connection details to the client.
+    """
     logger.error(
         "MongoDB request failed",
         extra={

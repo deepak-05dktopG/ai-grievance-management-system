@@ -1,3 +1,5 @@
+/* Global and responsive UI styles; preview them with `npm run dev` from frontend. */
+
 :root {
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   color: #23332f;

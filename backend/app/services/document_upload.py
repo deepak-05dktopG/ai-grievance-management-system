@@ -1,3 +1,6 @@
+"""Document validation and Cloudinary persistence for grievance attachments."""
+# Exercise through POST /api/v1/grievances/{reference_id}/documents on the running API.
+
 import logging
 from io import BytesIO
 from pathlib import PurePosixPath
@@ -40,19 +43,19 @@ ALLOWED_FORMATS = {
 
 
 class DocumentTooLargeError(Exception):
-    pass
+    """Raised when an attachment exceeds the configured byte limit."""
 
 
 class InvalidDocumentError(Exception):
-    pass
+    """Raised when filename, extension, MIME type, or file signature is invalid."""
 
 
 class DocumentUploadConfigurationError(Exception):
-    pass
+    """Raised when required Cloudinary settings are not configured."""
 
 
 class DocumentUploadError(Exception):
-    pass
+    """Raised for a remote upload or returned metadata that cannot be trusted."""
 
 
 def _validate_document(
@@ -60,6 +63,12 @@ def _validate_document(
     content_type: str | None,
     content: bytes,
 ) -> tuple[str, str]:
+    """Validate upload size, safe filename, extension, MIME type, and signature.
+
+    Steps: reject oversize/empty input, reduce any client path to its basename,
+    map the extension to an allowed type, then require both the declared MIME
+    type and leading file signature to match before returning normalized values.
+    """
     if len(content) > MAX_DOCUMENT_SIZE:
         raise DocumentTooLargeError
 
@@ -86,6 +95,7 @@ def _validate_document(
 
 
 def _cloudinary_options(settings: Settings) -> dict[str, str]:
+    """Build the provider options from settings without logging credential values."""
     return {
         "cloud_name": settings.cloudinary_cloud_name.strip(),
         "api_key": settings.cloudinary_api_key.get_secret_value().strip(),
@@ -94,6 +104,12 @@ def _cloudinary_options(settings: Settings) -> dict[str, str]:
 
 
 def _delete_uploaded_asset(public_id: str, options: dict[str, str]) -> None:
+    """Compensate for a failed database write by deleting the remote upload.
+
+    This compensating action is used when Cloudinary accepted the file but
+    metadata/audit persistence did not. Cleanup failures are logged as
+    sanitized events and do not replace the original database error.
+    """
     try:
         result = cloudinary_uploader.destroy(
             public_id,
@@ -123,6 +139,14 @@ def upload_supporting_document(
     actor: UserDocument | None,
     citizen_access_token: str | None,
 ) -> DocumentMetadata:
+    """Validate access, upload bytes, and persist metadata plus an audit event.
+
+    Steps: validate file bytes, authorize the citizen token or staff department,
+    check Cloudinary settings, upload under a random server-generated ID, and
+    validate the provider's HTTPS metadata. Then transactionally append metadata
+    and an audit event. If validation or the database transaction fails after
+    upload, delete the remote asset to avoid an orphan.
+    """
     clean_filename, file_format = _validate_document(filename, content_type, content)
 
     if actor is not None:
@@ -169,6 +193,8 @@ def upload_supporting_document(
         if isinstance(upload_result, dict)
         else None
     )
+    # Accept only the exact generated identifier so an unexpected provider
+    # response cannot cause metadata to point at a different asset.
     if not isinstance(uploaded_public_id, str) or uploaded_public_id != public_id:
         logger.error(
             "Cloudinary returned an invalid generated document identifier",
@@ -178,6 +204,7 @@ def upload_supporting_document(
             _delete_uploaded_asset(uploaded_public_id, cloudinary_options)
         raise DocumentUploadError
 
+    # Validate provider-returned metadata before writing any database reference.
     try:
         metadata = DocumentMetadata(
             original_filename=clean_filename,

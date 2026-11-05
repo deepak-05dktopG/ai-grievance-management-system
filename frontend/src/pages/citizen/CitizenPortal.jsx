@@ -1,3 +1,5 @@
+// Citizen submission, attachment, and tracking UI; run from frontend with `npm run dev`.
+
 import { useState } from 'react';
 import Brand from '../../components/Brand';
 import Alert from '../../components/Alert';
@@ -30,6 +32,7 @@ function formatTrackingDate(value, options) {
 }
 
 function filesFromInput(input) {
+  // Match client-side attachment checks to the backend's accepted types and size.
   const files = Array.from(input || []);
   if (files.some((file) => !ACCEPTED_TYPES.includes(file.type))) {
     throw new Error('Only PDF, JPG, JPEG, and PNG documents are accepted.');
@@ -77,6 +80,7 @@ export default function CitizenPortal() {
   }
 
   async function retryFailedUploads() {
+    // Retry only files that failed after the grievance itself was saved.
     if (!submission?.citizen_access_token || !failedUploads.length) return;
     setRetryingUploads(true);
     setUploadMessage('');
@@ -102,6 +106,7 @@ export default function CitizenPortal() {
   }
 
   async function handleSubmit(event) {
+    // Create the grievance first, then attach optional files with its access token.
     event.preventDefault();
     setSubmitError('');
     setFieldError('');
@@ -162,6 +167,7 @@ export default function CitizenPortal() {
   }
 
   async function handleTrack(event) {
+    // Fetch limited case progress with the citizen's private grievance token.
     event.preventDefault();
     setTrackingError('');
     setTracking(null);
@@ -189,6 +195,7 @@ export default function CitizenPortal() {
   }
 
   function copyAccessCode() {
+    // The access code is a bearer credential; only copy it when explicitly requested.
     if (submission?.citizen_access_token) {
       navigator.clipboard?.writeText(submission.citizen_access_token);
     }

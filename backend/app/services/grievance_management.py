@@ -1,3 +1,6 @@
+"""Grievance lifecycle, citizen access, routing, review, status, and audit services."""
+# Exercise through the grievance API: python -m uvicorn app.main:app --reload (from backend).
+
 import logging
 import math
 import hashlib
@@ -35,7 +38,7 @@ from app.services.department_mapping import (
     recommend_department,
 )
 from app.services.ai_classification import (
-    GeminiClassificationError,
+    ClassificationProviderError,
     classify_complaint,
 )
 from app.services.reference_id import generate_grievance_reference_id
@@ -71,33 +74,39 @@ ALLOWED_STATUS_TRANSITIONS = {
 
 
 class ReferenceIdConflictError(Exception):
-    pass
+    """Raised after unique-reference collisions exhaust the retry limit."""
 
 
 class GrievanceNotFoundError(Exception):
-    pass
+    """Raised when no grievance matches the requested public reference."""
 
 
 class InvalidStatusTransitionError(Exception):
-    pass
+    """Raised when a requested state change is illegal or loses a race."""
 
 
 class InvalidDepartmentError(Exception):
-    pass
+    """Raised when a staff correction selects an unconfigured department."""
 
 
 class GrievanceAccessDeniedError(Exception):
-    pass
+    """Raised when a staff account is outside the case's effective department."""
 
 
 class InvalidCitizenAccessTokenError(Exception):
-    pass
+    """Raised when citizen tracking credentials are invalid or expired."""
 
 
 def ensure_grievance_access(
     grievance: GrievanceDocument,
     actor: UserDocument,
 ) -> None:
+    """Require officers to match the currently effective case department.
+
+    Steps: allow administrators, reject users who are not configured officers,
+    choose the officer-approved department when present (otherwise the system
+    recommendation), and compare its code to the officer's assigned code.
+    """
     if actor.role is UserRole.ADMIN:
         return
     if actor.role is not UserRole.OFFICER or actor.department is None:
@@ -127,6 +136,7 @@ def _insert_audit_event(
     previous_values: dict[str, Any] | None = None,
     session: Any,
 ) -> None:
+    """Build and insert one audit record using the case transaction session."""
     audit = AuditLogDocument(
         grievance_id=grievance.id,
         reference_id=grievance.reference_id,
@@ -149,8 +159,17 @@ def create_grievance(
     database: Database,
     request: GrievanceCreateRequest,
 ) -> GrievanceDocument:
+    """Create a case, request advisory classification, and atomically audit it.
+
+    Steps: build the case and one-time citizen credential, call classification,
+    deterministically map its category, and mark low-confidence/unmapped or
+    failed results for manual review. Then insert the case and submission audit
+    in one Mongo transaction, retrying only public-reference collisions.
+    """
     grievance = GrievanceDocument(**request.model_dump())
     citizen_access_token = secrets.token_urlsafe(32)
+    # Keep the one-time plaintext token only on this response model; persist its
+    # digest and expiry so a database read cannot reveal the issued credential.
     grievance.citizen_access_token = citizen_access_token
     grievance.citizen_access_token_hash = hashlib.sha256(
         citizen_access_token.encode("utf-8")
@@ -159,7 +178,7 @@ def create_grievance(
     settings = get_settings()
     try:
         suggestion = classify_complaint(grievance.complaint_description, settings)
-    except GeminiClassificationError as exc:
+    except ClassificationProviderError as exc:
         grievance.ai_processing_status = AIProcessingStatus.MANUAL_REVIEW
         logger.warning(
             "Grievance saved for manual review after classification failure",
@@ -173,14 +192,17 @@ def create_grievance(
         grievance.recommended_department = recommend_department(
             suggestion.category
         )
+        # A model suggestion is complete only when confidence clears the
+        # configured threshold and deterministic routing found a department.
         if (
             grievance.recommended_department is not None
-            and suggestion.confidence >= settings.gemini_confidence_threshold
+            and suggestion.confidence >= settings.groq_confidence_threshold
         ):
             grievance.ai_processing_status = AIProcessingStatus.COMPLETED
         else:
             grievance.ai_processing_status = AIProcessingStatus.MANUAL_REVIEW
 
+    # Grievance creation and its submission audit event must commit together.
     for attempt in range(MAX_REFERENCE_ID_ATTEMPTS):
         session = database.client.start_session()
         try:
@@ -207,6 +229,8 @@ def create_grievance(
                     )
             return grievance
         except DuplicateKeyError:
+            # Only a unique-reference collision is retryable; other database
+            # failures propagate to the API's explicit database error handler.
             if attempt == MAX_REFERENCE_ID_ATTEMPTS - 1:
                 logger.error(
                     "Grievance reference ID collision retry limit reached",
@@ -222,6 +246,12 @@ def verify_citizen_access_token(
     reference_id: str,
     token: str,
 ) -> GrievanceDocument:
+    """Verify a grievance-scoped token digest and expiry before citizen access.
+
+    Steps: find the case, hash the supplied token, compare digests safely, check
+    that expiry is a datetime later than now, and validate the stored document.
+    A naive database datetime is interpreted as UTC.
+    """
     document = get_grievance(database, reference_id)
     if document is None:
         raise GrievanceNotFoundError
@@ -245,6 +275,12 @@ def get_citizen_tracking(
     reference_id: str,
     token: str,
 ) -> GrievanceTrackingResponse:
+    """Build the small tracking response that a citizen is allowed to see.
+
+    First validate the case-scoped access token, then expose status, AI-processing
+    state, review indicator, and timestamps without returning citizen details,
+    AI explanation, or internal assignment data.
+    """
     grievance = verify_citizen_access_token(database, reference_id, token)
     return GrievanceTrackingResponse(
         reference_id=grievance.reference_id,
@@ -261,6 +297,7 @@ def list_grievance_audit_logs(
     reference_id: str,
     actor: UserDocument,
 ) -> list[AuditLogResponse]:
+    """Check case visibility and convert its stored audit entries to response models."""
     grievance = get_grievance_by_reference(database, reference_id, actor)
     return [
         AuditLogResponse.model_validate(document)
@@ -273,6 +310,7 @@ def get_grievance_by_reference(
     reference_id: str,
     actor: UserDocument,
 ) -> GrievanceDocument:
+    """Find a case by public reference, validate its model, then enforce access."""
     document = get_grievance(database, reference_id)
     if document is None:
         raise GrievanceNotFoundError
@@ -282,6 +320,11 @@ def get_grievance_by_reference(
 
 
 def _effective_priority_query(priority: str) -> dict[str, Any]:
+    """Build a Mongo predicate using approved priority before AI suggestion.
+
+    A model suggestion is used for filtering only when no officer-approved
+    priority exists, matching which value is effective in the user interface.
+    """
     return {
         "$or": [
             {"officer_approved.priority": priority},
@@ -294,6 +337,11 @@ def _effective_priority_query(priority: str) -> dict[str, Any]:
 
 
 def _effective_department_query(department: str) -> dict[str, Any]:
+    """Build a Mongo predicate using approved routing before recommendation.
+
+    Cases with a staff correction match that department; unreviewed cases may
+    match the deterministic recommendation instead.
+    """
     return {
         "$or": [
             {"officer_approved.department.code": department},
@@ -314,6 +362,12 @@ def list_grievance_page(
     department: str | None = None,
     priority: str | None = None,
 ) -> dict[str, Any]:
+    """Apply optional filters and return a bounded page plus pagination metadata.
+
+    Steps: add only supplied filters, query the matching count and requested
+    slice, validate each Mongo document into a response model, and calculate
+    page count. Filter predicates prefer approved values over AI suggestions.
+    """
     clauses: list[dict[str, Any]] = []
     if status is not None:
         clauses.append({"status": status.value})
@@ -344,6 +398,14 @@ def review_grievance(
     request: GrievanceReviewRequest,
     actor: UserDocument,
 ) -> GrievanceDocument:
+    """Save staff-approved values while preserving AI suggestions and audit history.
+
+    Steps: open a transaction, load and authorize the case, merge only supplied
+    corrections with prior approved values, validate any department against the
+    fixed mapping, and persist the approved fields. Record before/after values
+    in the same transaction, then return the reloaded case; AI fields are not
+    overwritten.
+    """
     session = database.client.start_session()
     with session:
         with session.start_transaction():
@@ -373,6 +435,8 @@ def review_grievance(
 
             if "category" in changes:
                 values["category"] = changes["category"]
+                # A changed category invalidates its old subcategory. Unless
+                # staff explicitly supplies a department, route it deterministically.
                 if "subcategory" not in changes:
                     values["subcategory"] = None
                 if "department" not in request.model_fields_set:
@@ -463,6 +527,12 @@ def update_grievance_status(
     request: GrievanceStatusUpdateRequest,
     actor: UserDocument,
 ) -> GrievanceDocument:
+    """Enforce the workflow transition table and atomically record the change.
+
+    Steps: open a transaction, load and authorize the case, check the transition
+    table, update only if the stored old status still matches, write the audit
+    event, and reload the case. The compare-and-set protects concurrent updates.
+    """
     session = database.client.start_session()
     with session:
         with session.start_transaction():

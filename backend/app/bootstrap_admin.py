@@ -1,3 +1,5 @@
+"""Create the first administrator interactively; run from backend with: python -m app.bootstrap_admin."""
+
 from getpass import getpass
 from typing import NoReturn
 
@@ -14,10 +16,17 @@ from app.services.authentication import (
 
 
 def _fail(message: str) -> NoReturn:
+    """Stop the one-time bootstrap command with a safe operator-facing message."""
     raise SystemExit(message)
 
 
 def main() -> None:
+    """Prompt for bootstrap credentials and create the first admin exactly once.
+
+    The password is collected through ``getpass`` so it is not echoed; MongoDB
+    errors are replaced with a generic message that avoids exposing connection
+    details or credentials.
+    """
     settings = get_settings()
     if not settings.has_mongodb_configuration:
         _fail("Configure MongoDB before creating the first admin.")

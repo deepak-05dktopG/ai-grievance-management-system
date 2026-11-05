@@ -1,3 +1,5 @@
+// Officer/admin grievance dashboard; run from frontend with `npm run dev`.
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Alert from '../../components/Alert';
@@ -44,6 +46,7 @@ export default function Dashboard() {
   );
 
   const loadData = useCallback(async () => {
+    // Load the current page and status totals using the user's department scope.
     setLoading(true);
     setError('');
     const department = isOfficer ? user?.department?.code : filters.department;

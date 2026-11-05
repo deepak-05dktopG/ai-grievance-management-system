@@ -4,7 +4,7 @@
 ## Project Overview
 Build an AI-powered Grievance Management System for a hypothetical Indian District Administration.
 
-The system allows citizens to submit grievances, uses Gemini AI to classify and summarize complaints, recommends departments through deterministic mapping rules, and allows authorized officers to review and manage cases.
+The system allows citizens to submit grievances, uses Groq AI to classify and summarize complaints, recommends departments through deterministic mapping rules, and allows authorized officers to review and manage cases.
 
 ## Technology Stack
 
@@ -28,7 +28,7 @@ The system allows citizens to submit grievances, uses Gemini AI to classify and 
 - Store Cloudinary URLs, public IDs and file metadata in MongoDB.
 
 ### AI
-- Google Gemini API.
+- Groq API through its OpenAI-compatible Python SDK.
 - Structured JSON responses.
 - Server-side AI integration only.
 

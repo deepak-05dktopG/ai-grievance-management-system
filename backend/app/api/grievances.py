@@ -1,3 +1,6 @@
+"""Grievance API routes; run the API from backend with: python -m uvicorn app.main:app --reload."""
+# API prefix: /api/v1/grievances; use the route paths below for feature requests.
+
 from typing import Annotated
 
 from fastapi import (
@@ -69,6 +72,7 @@ ReferenceId = Annotated[
 
 
 def _not_found() -> HTTPException:
+    """Build the same non-identifying 404 response for missing case records."""
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Grievance not found",
@@ -84,11 +88,19 @@ def submit_grievance(
     request: GrievanceCreateRequest,
     database: Annotated[Database, Depends(get_database)],
 ) -> GrievanceSubmissionResponse:
+    """Create and return a citizen grievance with its tracking credentials.
+
+    Steps: validate the request, call the management service to classify and
+    persist the case plus its audit record, then return the reference and the
+    one-time citizen token. The service stores only the token hash; the plaintext
+    token is exposed only in this initial response for later tracking/uploads.
+    """
     try:
         grievance = create_grievance(database, request)
-        response = GrievanceResponse.model_validate(grievance).model_dump(
+        response = grievance.model_dump(
             mode="json",
             by_alias=True,
+            exclude_none=True,
         )
         response["citizen_access_token"] = grievance.citizen_access_token
         return GrievanceSubmissionResponse.model_validate(response)
@@ -111,6 +123,12 @@ def track_grievance(
         Header(alias="X-Citizen-Access-Token"),
     ],
 ) -> GrievanceTrackingResponse:
+    """Return only permitted progress fields after validating the citizen token.
+
+    Steps: take the reference from the URL, take the citizen token from its
+    dedicated header, ask the service to verify token hash and expiry, then
+    return the deliberately limited tracking response.
+    """
     try:
         return get_citizen_tracking(database, reference_id, citizen_access_token)
     except GrievanceNotFoundError:
@@ -143,6 +161,12 @@ def list_grievances(
     ] = None,
     priority: Priority | None = None,
 ) -> GrievanceListResponse:
+    """List a filtered page while constraining officers to their own department.
+
+    Steps: authenticate the user, constrain officer queries to their assigned
+    department (rejecting conflicting filters), pass validated pagination and
+    optional filters to the service, then return the result page.
+    """
     if current_user.role is UserRole.OFFICER:
         if current_user.department is None:
             raise HTTPException(
@@ -175,6 +199,11 @@ def get_grievance(
     database: Annotated[Database, Depends(get_database)],
     current_user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> GrievanceDocument:
+    """Return one case after the service enforces role and department access.
+
+    The route translates expected missing/forbidden outcomes into HTTP status
+    codes; the service owns the database lookup and access decision.
+    """
     try:
         return get_grievance_by_reference(database, reference_id, current_user)
     except GrievanceNotFoundError:
@@ -196,6 +225,12 @@ def review_grievance_endpoint(
     database: Annotated[Database, Depends(get_database)],
     current_user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> GrievanceDocument:
+    """Save staff corrections in the approved fields without replacing AI output.
+
+    Steps: authenticate staff, validate the correction body, delegate department
+    and transaction checks to the service, then translate expected outcomes to
+    HTTP responses. The original AI suggestion remains a separate record.
+    """
     try:
         return review_grievance(database, reference_id, request, current_user)
     except GrievanceNotFoundError:
@@ -222,6 +257,13 @@ def update_status(
     database: Annotated[Database, Depends(get_database)],
     current_user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> GrievanceDocument:
+    """Apply a workflow transition through the service's allow-list and audit.
+
+    Steps: authenticate staff, validate the requested enum, ask the service to
+    check the transition table and atomically update plus audit, then return the
+    updated case. A conflict means an illegal or concurrent transition; an
+    unknown status is rejected earlier by request validation.
+    """
     try:
         return update_grievance_status(database, reference_id, request, current_user)
     except GrievanceNotFoundError:
@@ -247,6 +289,11 @@ def grievance_audit_logs(
     database: Annotated[Database, Depends(get_database)],
     current_user: Annotated[UserDocument, Depends(get_current_user)],
 ) -> list[AuditLogResponse]:
+    """Return audit events only after the actor passes case access checks.
+
+    The service loads the case, applies role/department rules, and reads its
+    ordered audit records; this route exposes them through the response schema.
+    """
     try:
         return list_grievance_audit_logs(database, reference_id, current_user)
     except GrievanceNotFoundError:
@@ -269,6 +316,13 @@ async def upload_document(
     uploader: Annotated[DocumentUploader, Depends(get_document_uploader)],
     file: UploadFile = File(...),
 ) -> DocumentMetadata:
+    """Read a bounded upload and delegate authorization and persistence.
+
+    Steps: read no more than the maximum size plus one detection byte, pass the
+    file and the dependency-resolved uploader identity to the upload service,
+    then map validation, storage, and configuration failures to HTTP responses.
+    The extra byte detects oversize input without buffering an unbounded upload.
+    """
     content = await file.read(5 * 1024 * 1024 + 1)
     try:
         return upload_supporting_document(

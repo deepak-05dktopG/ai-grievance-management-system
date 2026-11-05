@@ -1,3 +1,5 @@
+// Administrator account creation form; run from frontend with `npm run dev`.
+
 import { useState } from 'react';
 import Alert from '../../components/Alert';
 import { authApi, getErrorMessage } from '../../services/api';
@@ -44,6 +46,7 @@ export default function AdminUsers() {
   }
 
   async function handleSubmit(event) {
+    // Send only the fields required for the selected role and surface API errors.
     event.preventDefault();
     setSaving(true);
     setError('');

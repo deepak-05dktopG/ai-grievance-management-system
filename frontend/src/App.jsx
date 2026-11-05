@@ -1,3 +1,5 @@
+// Route table and access guards; run from frontend with `npm run dev`.
+
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AppShell from './layouts/AppShell';
@@ -9,6 +11,7 @@ import GrievanceDetails from './pages/officer/GrievanceDetails';
 import './styles.css';
 
 function ProtectedRoute({ children }) {
+  // Wait for session restoration before redirecting unauthenticated users.
   const { isAuthenticated, loading } = useAuth();
 
   if (loading) {
@@ -24,6 +27,7 @@ function ProtectedRoute({ children }) {
 }
 
 function AdminRoute({ children }) {
+  // Keep the user-management page limited to administrators.
   const { user } = useAuth();
   return user?.role === 'ADMIN' ? children : <Navigate to="/dashboard" replace />;
 }
@@ -58,6 +62,7 @@ function ApplicationRoutes() {
 }
 
 export default function App() {
+  // Provide shared authentication state to every route.
   return (
     <AuthProvider>
       <ApplicationRoutes />

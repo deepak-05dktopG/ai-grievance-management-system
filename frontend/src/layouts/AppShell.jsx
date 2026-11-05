@@ -1,3 +1,5 @@
+// Authenticated dashboard shell and navigation; run from frontend with `npm run dev`.
+
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Brand from '../components/Brand';
@@ -7,6 +9,7 @@ export default function AppShell() {
   const navigate = useNavigate();
 
   function handleLogout() {
+    // Clear the browser session token before returning to staff login.
     logout();
     navigate('/login', { replace: true });
   }

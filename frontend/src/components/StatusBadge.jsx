@@ -1,3 +1,5 @@
+// Map backend grievance statuses to their display labels; preview with `npm run dev`.
+
 const STATUS_LABELS = {
   SUBMITTED: 'Submitted',
   UNDER_REVIEW: 'Under review',

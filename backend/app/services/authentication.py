@@ -1,3 +1,6 @@
+"""Password hashing, JWT issuance/verification, and account creation services."""
+# Exercise through the API: python -m uvicorn app.main:app --reload (from backend).
+
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -25,34 +28,35 @@ PASSWORD_HASHER = PasswordHasher()
 
 
 class AuthenticationConfigurationError(Exception):
-    pass
+    """Raised when a required authentication secret is missing or unsafe."""
 
 
 class InvalidCredentialsError(Exception):
-    pass
+    """Raised for unknown accounts or passwords that do not verify."""
 
 
 class InactiveUserError(Exception):
-    pass
+    """Raised when an account exists but is disabled."""
 
 
 class InvalidTokenError(Exception):
-    pass
+    """Raised when a JWT is invalid or its subject cannot resolve to a user."""
 
 
 class UserAlreadyExistsError(Exception):
-    pass
+    """Raised when an account with the normalized email already exists."""
 
 
 class InvalidUserDepartmentError(Exception):
-    pass
+    """Raised when account creation names an unsupported department."""
 
 
 class AdminAlreadyBootstrappedError(Exception):
-    pass
+    """Raised when a second initial administrator bootstrap is attempted."""
 
 
 def _signing_key(settings: Settings) -> str:
+    """Return the configured JWT secret or reject an unsafe short key."""
     key = settings.jwt_secret_key.get_secret_value().strip()
     if len(key) < 32:
         raise AuthenticationConfigurationError
@@ -60,6 +64,12 @@ def _signing_key(settings: Settings) -> str:
 
 
 def create_access_token(user: UserDocument, settings: Settings) -> tuple[str, int]:
+    """Create the bearer token returned after successful login.
+
+    Steps: read the configured signing key, calculate the expiry from settings,
+    add the user ID and issuer claims, sign with HS256, and return both token
+    and lifetime so the client knows when it must authenticate again.
+    """
     expires_in = settings.jwt_access_token_minutes * 60
     now = datetime.now(timezone.utc)
     token = jwt.encode(
@@ -76,6 +86,12 @@ def create_access_token(user: UserDocument, settings: Settings) -> tuple[str, in
 
 
 def decode_access_token(token: str, settings: Settings) -> ObjectId:
+    """Verify a bearer token before its subject is used for database lookup.
+
+    Validate signature, algorithm, issuer, expiry, and required claims; then
+    validate ``sub`` as a Mongo ObjectId. Collapse malformed/expired token
+    details into one internal error so API responses do not leak JWT internals.
+    """
     try:
         payload = jwt.decode(
             token,
@@ -99,6 +115,12 @@ def authenticate_user(
     email: str,
     password: str,
 ) -> UserDocument:
+    """Authenticate credentials and return only an active validated account.
+
+    Steps: normalize the email, load the stored account, verify the Argon2 hash,
+    construct the Pydantic user model, and reject disabled accounts. Unknown
+    users and bad passwords share one error to avoid account enumeration.
+    """
     document = get_user_by_email(database, email.strip().casefold())
     if document is None:
         raise InvalidCredentialsError
@@ -114,6 +136,11 @@ def authenticate_user(
 
 
 def get_active_user(database: Database, user_id: ObjectId) -> UserDocument:
+    """Resolve a verified token subject to a currently active account.
+
+    A valid token is not sufficient on its own: every protected request reloads
+    the account so deleted or disabled users lose access immediately.
+    """
     document = get_user_by_id(database, user_id)
     if document is None:
         raise InvalidTokenError
@@ -124,6 +151,12 @@ def get_active_user(database: Database, user_id: ObjectId) -> UserDocument:
 
 
 def _build_user_document(request: UserCreate) -> UserDocument:
+    """Convert validated create input into a safe document for MongoDB.
+
+    Resolve any department code against the configured mapping, hash the
+    SecretStr password with Argon2, and build the domain model. Unknown
+    department codes fail before the database insert.
+    """
     department = None
     if request.department_code is not None:
         department = get_department_by_code(request.department_code)
@@ -140,6 +173,11 @@ def _build_user_document(request: UserCreate) -> UserDocument:
 
 
 def create_user(database: Database, request: UserCreate) -> UserDocument:
+    """Create a validated account while relying on the unique index for races.
+
+    Check for an existing canonical email, build the model with a password hash,
+    insert it, and translate Mongo's duplicate-key race into a domain error.
+    """
     if get_user_by_email(database, request.email) is not None:
         raise UserAlreadyExistsError
     user = _build_user_document(request)
@@ -157,6 +195,13 @@ def create_first_admin(
     email: str,
     password: str,
 ) -> UserDocument:
+    """Create the initial admin only when no administrator is already present.
+
+    Steps: check whether any admin already exists, construct admin input through
+    the same validation used by regular account creation, and delegate hashing
+    and insertion to ``create_user``. The email unique index protects a
+    duplicate-address race; the admin-count check is the bootstrap guard.
+    """
     if has_admin_user(database):
         raise AdminAlreadyBootstrappedError
     return create_user(

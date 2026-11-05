@@ -1,3 +1,5 @@
+// Shared Creditfix brand mark; preview with `npm run dev` from frontend.
+
 export default function Brand({ compact = false }) {
   return (
     <div className={`brand-lockup ${compact ? 'brand-compact' : ''}`}>
