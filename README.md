@@ -25,9 +25,11 @@ py -3.11 -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-Copy `backend/.env.example` to `backend/.env` and set `MONGODB_URI` and
-`MONGODB_DB_NAME` to your own MongoDB Atlas configuration. The backend can start
-without these values, but `/health/db` will report the database as unavailable.
+Copy `.env.example` to `.env` and set `MONGODB_URI` and
+`MONGODB_DB_NAME` to your own MongoDB Atlas configuration. The backend starts
+without these values, but `/health` reports the database as not configured.
+When configured, the health endpoint pings MongoDB on each request and returns
+HTTP 503 unless the connection is available.
 
 Run the API and tests from `backend/`:
 
@@ -36,10 +38,7 @@ python -m uvicorn app.main:app --reload
 python -m pytest
 ```
 
-The current grievance API supports submission, retrieval with status/category/
-department filters and pagination, officer review updates, and status changes.
-Officer review and status endpoints are not authenticated yet and must only be
-used in the local prototype environment until authorization is implemented.
+Open `http://127.0.0.1:8000/health` to check application and database status.
 
 ## Frontend setup
 
@@ -51,4 +50,5 @@ npm run dev
 ```
 
 ## Notes
-This repository is for the prototype scaffold only. Application features and business logic will be added in subsequent implementation steps.
+This project is being implemented incrementally. The current backend provides
+configuration, MongoDB connection lifecycle management, and health reporting.
