@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     gemini_model: str = Field(default="gemini-2.5-flash", min_length=1, max_length=100)
     gemini_confidence_threshold: float = Field(default=0.65, ge=0, le=1)
     gemini_timeout_ms: int = Field(default=15000, ge=1000, le=120000)
+    cloudinary_cloud_name: str = ""
+    cloudinary_api_key: SecretStr = SecretStr("")
+    cloudinary_api_secret: SecretStr = SecretStr("")
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ENV_FILE,
@@ -30,6 +33,14 @@ class Settings(BaseSettings):
         return bool(
             self.mongodb_uri.get_secret_value().strip()
             and self.mongodb_db_name.strip()
+        )
+
+    @property
+    def has_cloudinary_configuration(self) -> bool:
+        return bool(
+            self.cloudinary_cloud_name.strip()
+            and self.cloudinary_api_key.get_secret_value().strip()
+            and self.cloudinary_api_secret.get_secret_value().strip()
         )
 
 

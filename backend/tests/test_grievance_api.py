@@ -1,7 +1,9 @@
 from copy import deepcopy
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
+from cloudinary.exceptions import Error as CloudinaryError
 from fastapi.testclient import TestClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 from pydantic import SecretStr
@@ -12,7 +14,7 @@ from app.core.config import Settings
 from app.database.indexes import AUDIT_LOGS_COLLECTION, GRIEVANCES_COLLECTION
 from app.models.enums import AIProcessingStatus, Priority
 from app.models.grievance import AISuggestion
-from app.services import grievance_management
+from app.services import document_upload, grievance_management
 from app.services.ai_classification import GeminiClassificationError
 
 
@@ -98,7 +100,9 @@ class MemoryCollection:
     ) -> Any:
         for document in self.documents:
             if _matches(document, query):
-                document.update(deepcopy(update["$set"]))
+                document.update(deepcopy(update.get("$set", {})))
+                for field_name, value in update.get("$push", {}).items():
+                    document.setdefault(field_name, []).append(deepcopy(value))
                 return type("UpdateResult", (), {"matched_count": 1})()
         return type("UpdateResult", (), {"matched_count": 0})()
 
@@ -230,6 +234,16 @@ def submit(client: TestClient, name: str = "Asha Sharma") -> dict[str, Any]:
     return response.json()
 
 
+def configure_cloudinary(monkeypatch) -> None:
+    settings = Settings(
+        _env_file=None,
+        cloudinary_cloud_name="synthetic-cloud",
+        cloudinary_api_key=SecretStr("synthetic-key"),
+        cloudinary_api_secret=SecretStr("synthetic-secret"),
+    )
+    monkeypatch.setattr(document_upload, "get_settings", lambda: settings)
+
+
 def test_submit_creates_grievance_and_audit_event(api_client) -> None:
     client, database = api_client
 
@@ -358,6 +372,312 @@ def test_invalid_or_unavailable_ai_keeps_submission_for_manual_review(
     assert saved["recommended_department"] is None
     assert len(database[GRIEVANCES_COLLECTION].documents) == 1
     assert len(database[AUDIT_LOGS_COLLECTION].documents) == 1
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type", "content", "expected_format"),
+    [
+        ("evidence.pdf", "application/pdf", b"%PDF-1.7 synthetic document", "pdf"),
+        ("evidence.jpg", "image/jpeg", b"\xff\xd8\xffsynthetic image", "jpg"),
+        ("evidence.jpeg", "image/jpeg", b"\xff\xd8\xffsynthetic image", "jpeg"),
+        ("evidence.png", "image/png", b"\x89PNG\r\n\x1a\nsynthetic image", "png"),
+    ],
+)
+def test_upload_document_stores_generated_cloudinary_metadata_and_audit(
+    api_client,
+    monkeypatch,
+    filename,
+    content_type,
+    content,
+    expected_format,
+) -> None:
+    client, database = api_client
+    reference_id = submit(client)["reference_id"]
+    configure_cloudinary(monkeypatch)
+    upload_calls: list[tuple[bytes, dict[str, Any]]] = []
+
+    def fake_upload(file, **options):
+        upload_calls.append((file.read(), options))
+        return {
+            "public_id": options["public_id"],
+            "secure_url": (
+                "https://res.cloudinary.com/synthetic-cloud/raw/upload/"
+                f"{options['public_id']}"
+            ),
+        }
+
+    monkeypatch.setattr(document_upload.cloudinary_uploader, "upload", fake_upload)
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={"file": (filename, content, content_type)},
+    )
+
+    assert response.status_code == 201
+    uploaded = response.json()
+    assert uploaded["original_filename"] == filename
+    assert uploaded["cloudinary_public_id"].startswith(
+        f"grievances/{reference_id}/documents/"
+    )
+    assert "evidence.pdf" not in uploaded["cloudinary_public_id"]
+    assert uploaded["secure_url"].startswith("https://")
+    assert uploaded["format"] == expected_format
+    assert uploaded["size_bytes"] == len(content)
+    assert uploaded["uploaded_at"]
+    assert upload_calls[0][0] == content
+    assert upload_calls[0][1]["resource_type"] == "raw"
+    assert upload_calls[0][1]["overwrite"] is False
+    assert upload_calls[0][1]["api_key"] == "synthetic-key"
+
+    saved = database[GRIEVANCES_COLLECTION].documents[0]
+    assert saved["supporting_documents"][0]["cloudinary_public_id"] == (
+        uploaded["cloudinary_public_id"]
+    )
+    audit = database[AUDIT_LOGS_COLLECTION].documents[-1]
+    assert audit["action"] == "grievance.document_uploaded"
+    assert audit["new_values"]["format"] == expected_format
+
+
+def test_upload_filename_path_is_reduced_to_original_name(api_client, monkeypatch) -> None:
+    client, _ = api_client
+    reference_id = submit(client)["reference_id"]
+    configure_cloudinary(monkeypatch)
+
+    def fake_upload(file, **options):
+        return {
+            "public_id": options["public_id"],
+            "secure_url": "https://res.cloudinary.com/synthetic-cloud/raw/upload/file.pdf",
+        }
+
+    monkeypatch.setattr(document_upload.cloudinary_uploader, "upload", fake_upload)
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={
+            "file": (
+                r"C:\fakepath\evidence.pdf",
+                b"%PDF-1.7 synthetic document",
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["original_filename"] == "evidence.pdf"
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type", "content"),
+    [
+        ("evidence.txt", "text/plain", b"plain text"),
+        ("evidence.pdf", "image/png", b"%PDF-1.7 document"),
+        ("evidence.png", "image/png", b"not a png"),
+    ],
+)
+def test_upload_rejects_unsupported_or_mismatched_file_content(
+    api_client,
+    monkeypatch,
+    filename,
+    content_type,
+    content,
+) -> None:
+    client, _ = api_client
+    reference_id = submit(client)["reference_id"]
+    cloudinary_upload = Mock()
+    monkeypatch.setattr(document_upload.cloudinary_uploader, "upload", cloudinary_upload)
+
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={"file": (filename, content, content_type)},
+    )
+
+    assert response.status_code == 415
+    cloudinary_upload.assert_not_called()
+
+
+def test_upload_rejects_files_over_five_megabytes_without_cloudinary_call(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, _ = api_client
+    reference_id = submit(client)["reference_id"]
+    cloudinary_upload = Mock()
+    monkeypatch.setattr(document_upload.cloudinary_uploader, "upload", cloudinary_upload)
+
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={
+            "file": (
+                "large.pdf",
+                b"%PDF-" + b"x" * (5 * 1024 * 1024),
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 413
+    cloudinary_upload.assert_not_called()
+
+
+def test_upload_accepts_file_at_five_megabyte_limit(api_client, monkeypatch) -> None:
+    client, _ = api_client
+    reference_id = submit(client)["reference_id"]
+    configure_cloudinary(monkeypatch)
+    monkeypatch.setattr(
+        document_upload.cloudinary_uploader,
+        "upload",
+        lambda file, **options: {
+            "public_id": options["public_id"],
+            "secure_url": "https://res.cloudinary.com/synthetic-cloud/raw/upload/file.pdf",
+        },
+    )
+    content = b"%PDF-" + b"x" * (5 * 1024 * 1024 - len(b"%PDF-"))
+
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={"file": ("large.pdf", content, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["size_bytes"] == 5 * 1024 * 1024
+
+
+def test_missing_grievance_does_not_upload_document(api_client, monkeypatch) -> None:
+    client, _ = api_client
+    cloudinary_upload = Mock()
+    monkeypatch.setattr(document_upload.cloudinary_uploader, "upload", cloudinary_upload)
+
+    response = client.post(
+        "/api/v1/grievances/CFX-20260101-000000000000/documents",
+        files={"file": ("evidence.pdf", b"%PDF-1.7 document", "application/pdf")},
+    )
+
+    assert response.status_code == 404
+    cloudinary_upload.assert_not_called()
+
+
+def test_missing_cloudinary_configuration_returns_service_unavailable(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, _ = api_client
+    reference_id = submit(client)["reference_id"]
+    cloudinary_upload = Mock()
+    monkeypatch.setattr(document_upload.cloudinary_uploader, "upload", cloudinary_upload)
+    monkeypatch.setattr(
+        document_upload,
+        "get_settings",
+        lambda: Settings(_env_file=None),
+    )
+
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={"file": ("evidence.pdf", b"%PDF-1.7 document", "application/pdf")},
+    )
+
+    assert response.status_code == 503
+    cloudinary_upload.assert_not_called()
+
+
+def test_cloudinary_failure_does_not_change_grievance_or_audit(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, database = api_client
+    reference_id = submit(client)["reference_id"]
+    configure_cloudinary(monkeypatch)
+    monkeypatch.setattr(
+        document_upload.cloudinary_uploader,
+        "upload",
+        Mock(side_effect=CloudinaryError("synthetic provider failure")),
+    )
+    before_audit_count = len(database[AUDIT_LOGS_COLLECTION].documents)
+
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={"file": ("evidence.pdf", b"%PDF-1.7 document", "application/pdf")},
+    )
+
+    assert response.status_code == 502
+    assert database[GRIEVANCES_COLLECTION].documents[0].get(
+        "supporting_documents", []
+    ) == []
+    assert len(database[AUDIT_LOGS_COLLECTION].documents) == before_audit_count
+
+
+def test_invalid_cloudinary_metadata_is_cleaned_up_and_not_persisted(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, database = api_client
+    reference_id = submit(client)["reference_id"]
+    configure_cloudinary(monkeypatch)
+    uploaded_ids: list[str] = []
+    deleted_ids: list[str] = []
+
+    def fake_upload(file, **options):
+        uploaded_ids.append(options["public_id"])
+        return {
+            "public_id": options["public_id"],
+            "secure_url": "http://insecure.example/file.pdf",
+        }
+
+    monkeypatch.setattr(document_upload.cloudinary_uploader, "upload", fake_upload)
+    monkeypatch.setattr(
+        document_upload.cloudinary_uploader,
+        "destroy",
+        lambda public_id, **options: deleted_ids.append(public_id)
+        or {"result": "ok"},
+    )
+
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={"file": ("evidence.pdf", b"%PDF-1.7 document", "application/pdf")},
+    )
+
+    assert response.status_code == 502
+    assert database[GRIEVANCES_COLLECTION].documents[0].get(
+        "supporting_documents", []
+    ) == []
+    assert deleted_ids == uploaded_ids
+
+
+def test_document_persistence_failure_rolls_back_and_cleans_up_cloudinary(
+    api_client,
+    monkeypatch,
+) -> None:
+    client, database = api_client
+    reference_id = submit(client)["reference_id"]
+    configure_cloudinary(monkeypatch)
+    uploaded_ids: list[str] = []
+    deleted_ids: list[str] = []
+
+    def fake_upload(file, **options):
+        uploaded_ids.append(options["public_id"])
+        return {
+            "public_id": options["public_id"],
+            "secure_url": "https://res.cloudinary.com/synthetic-cloud/raw/upload/file.pdf",
+        }
+
+    monkeypatch.setattr(document_upload.cloudinary_uploader, "upload", fake_upload)
+    monkeypatch.setattr(
+        document_upload.cloudinary_uploader,
+        "destroy",
+        lambda public_id, **options: deleted_ids.append(public_id)
+        or {"result": "ok"},
+    )
+    database[AUDIT_LOGS_COLLECTION].insert_error = ConnectionFailure(
+        "synthetic audit storage failure"
+    )
+
+    response = client.post(
+        f"/api/v1/grievances/{reference_id}/documents",
+        files={"file": ("evidence.pdf", b"%PDF-1.7 document", "application/pdf")},
+    )
+
+    assert response.status_code == 503
+    assert database[GRIEVANCES_COLLECTION].documents[0].get(
+        "supporting_documents", []
+    ) == []
+    assert deleted_ids == uploaded_ids
 
 
 def test_duplicate_reference_collision_is_retried(api_client) -> None:

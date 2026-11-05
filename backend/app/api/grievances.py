@@ -1,11 +1,20 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+    status,
+)
 from pymongo.database import Database
 
 from app.api.dependencies import get_database
 from app.models.enums import GrievanceStatus, Priority
-from app.models.grievance import GrievanceDocument
+from app.models.grievance import DocumentMetadata, GrievanceDocument
 from app.schemas.grievance import (
     GrievanceCreateRequest,
     GrievanceListResponse,
@@ -24,6 +33,13 @@ from app.services.grievance_management import (
     list_grievance_page,
     review_grievance,
     update_grievance_status,
+)
+from app.services.document_upload import (
+    DocumentTooLargeError,
+    DocumentUploadConfigurationError,
+    DocumentUploadError,
+    InvalidDocumentError,
+    upload_supporting_document,
 )
 
 
@@ -147,3 +163,48 @@ def update_status(
             status_code=status.HTTP_409_CONFLICT,
             detail="Status transition is not allowed",
         ) from None
+
+
+@router.post(
+    "/{reference_id}/documents",
+    response_model=DocumentMetadata,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_document(
+    reference_id: ReferenceId,
+    database: Annotated[Database, Depends(get_database)],
+    file: UploadFile = File(...),
+) -> DocumentMetadata:
+    content = await file.read(5 * 1024 * 1024 + 1)
+    try:
+        return upload_supporting_document(
+            database,
+            reference_id,
+            filename=file.filename,
+            content_type=file.content_type,
+            content=content,
+        )
+    except DocumentTooLargeError:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File exceeds the 5 MB limit",
+        ) from None
+    except InvalidDocumentError:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Only valid PDF, JPG, JPEG, and PNG files are allowed",
+        ) from None
+    except GrievanceNotFoundError:
+        raise _not_found() from None
+    except DocumentUploadConfigurationError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Document storage is not configured",
+        ) from None
+    except DocumentUploadError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Document storage upload failed",
+        ) from None
+    finally:
+        await file.close()

@@ -19,6 +19,7 @@ class AuditLogDocument(CreatedModel):
         "grievance.submitted",
         "grievance.reviewed",
         "grievance.status_changed",
+        "grievance.document_uploaded",
     ]
     actor: AuditActor
     previous_values: dict[str, Any] | None = None
