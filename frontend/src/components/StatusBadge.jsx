@@ -11,7 +11,10 @@ const STATUS_LABELS = {
 
 export default function StatusBadge({ status }) {
   return (
-    <span className={`status-badge status-${String(status || '').toLowerCase()}`}>
+    <span
+      className={`status-badge status-${String(status || '').toLowerCase()}`}
+      aria-label={`Grievance status: ${STATUS_LABELS[status] || status || 'Unknown'}`}
+    >
       <span className="status-dot" />
       {STATUS_LABELS[status] || status || 'Unknown'}
     </span>

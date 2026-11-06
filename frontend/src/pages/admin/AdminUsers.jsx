@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Alert from '../../components/Alert';
+import Icon from '../../components/Icon';
 import { authApi, getErrorMessage } from '../../services/api';
 
 const DEPARTMENTS = [
@@ -75,35 +76,35 @@ export default function AdminUsers() {
       <div className="page-heading-row">
         <div>
           <span className="eyebrow">ADMINISTRATION</span>
-          <h1>User management</h1>
-          <p>Create officer accounts and grant access to the appropriate department.</p>
+          <h1>Account access</h1>
+          <p>Create a staff account and assign officers to their authorized department.</p>
         </div>
-        <span className="admin-role-chip">ADMIN ONLY</span>
+        <span className="admin-role-chip"><Icon name="lock" size={15} /> Administrator only</span>
       </div>
       <div className="admin-users-grid">
-        <section className="dashboard-panel detail-panel">
+        <section className="dashboard-panel detail-panel" aria-labelledby="create-user-title">
           <div className="panel-title-row">
-            <div><span className="eyebrow">NEW ACCOUNT</span><h2>Create a user</h2></div>
+            <div className="panel-title-icon"><span className="section-icon"><Icon name="user" /></span><div><span className="eyebrow">NEW ACCOUNT</span><h2 id="create-user-title">Create staff account</h2></div></div>
           </div>
-          <p className="panel-intro">Passwords are stored as Argon2 hashes and are never shown again after account creation.</p>
+          <p className="panel-intro">Set the account role and department carefully. Passwords are securely hashed and are not returned by the API.</p>
           <Alert>{error}</Alert>
-          {notice && <Alert variant="success" onDismiss={() => setNotice('')}>{notice}</Alert>}
-          <form className="portal-form user-create-form" onSubmit={handleSubmit}>
+          {notice && <Alert variant="success" onDismiss={() => setNotice('')}><span role="status">{notice}</span></Alert>}
+          <form className="portal-form user-create-form" onSubmit={handleSubmit} aria-busy={saving}>
             <label className="form-label-wrap">
-              <span>Full name</span>
+              <span>Full name <b aria-hidden="true">*</b></span>
               <input className="form-control" name="name" value={form.name} onChange={updateField} required maxLength={120} />
             </label>
             <label className="form-label-wrap">
-              <span>Email address</span>
+              <span>Email address <b aria-hidden="true">*</b></span>
               <input className="form-control" type="email" name="email" value={form.email} onChange={updateField} required maxLength={254} />
             </label>
             <label className="form-label-wrap">
-              <span>Temporary password</span>
+              <span>Initial password <b aria-hidden="true">*</b></span>
               <input className="form-control" type="password" name="password" value={form.password} onChange={updateField} minLength={12} maxLength={128} required autoComplete="new-password" />
-              <small className="field-note">At least 12 characters. Share it securely with the account holder.</small>
+              <small className="field-note">Use 12–128 characters. Share it with the account holder through a secure channel.</small>
             </label>
             <label className="form-label-wrap">
-              <span>Role</span>
+              <span>Account role <b aria-hidden="true">*</b></span>
               <select className="form-select" name="role" value={form.role} onChange={updateField}>
                 <option value="OFFICER">Officer</option>
                 <option value="ADMIN">Administrator</option>
@@ -111,31 +112,31 @@ export default function AdminUsers() {
             </label>
             {form.role === 'OFFICER' && (
               <label className="form-label-wrap">
-                <span>Department</span>
+              <span>Assigned department <b aria-hidden="true">*</b></span>
                 <select className="form-select" name="departmentCode" value={form.departmentCode} onChange={updateField} required>
                   {DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
                 </select>
               </label>
             )}
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Creating account…' : 'Create account'}
+            <button type="submit" className="btn btn-primary create-account-button" disabled={saving}>
+              {saving ? <><span className="spinner-border spinner-border-sm" />Creating account…</> : <><Icon name="plus" size={18} /> Create account</>}
             </button>
           </form>
         </section>
-        <section className="dashboard-panel detail-panel">
+        <section className="dashboard-panel detail-panel" aria-labelledby="roles-title">
           <div className="panel-title-row">
-            <div><span className="eyebrow">ACCESS MODEL</span><h2>Roles & permissions</h2></div>
+            <div className="panel-title-icon"><span className="section-icon"><Icon name="shield" /></span><div><span className="eyebrow">ACCESS MODEL</span><h2 id="roles-title">Roles and scope</h2></div></div>
           </div>
           <div className="role-info-card">
-            <span className="role-info-icon admin-icon">A</span>
-            <div><strong>Administrator</strong><p>Full grievance access, status and review controls, and user creation.</p></div>
+            <span className="role-info-icon admin-icon"><Icon name="shield" size={18} /></span>
+            <div><strong>Administrator</strong><p>Access across the grievance register, case review, status controls, and account creation.</p></div>
           </div>
           <div className="role-info-card">
-            <span className="role-info-icon officer-icon">O</span>
-            <div><strong>Officer</strong><p>Grievance access and case actions are limited to the assigned department.</p></div>
+            <span className="role-info-icon officer-icon"><Icon name="user" size={18} /></span>
+            <div><strong>Officer</strong><p>Grievance access and case actions are limited by the assigned department.</p></div>
           </div>
           <div className="admin-list-heading">
-            <span className="eyebrow">CREATED THIS SESSION</span>
+            <div><span className="eyebrow">RECENTLY CREATED</span><p>Accounts created during this browser session</p></div>
             <span>{createdUsers.length}</span>
           </div>
           {createdUsers.length ? (

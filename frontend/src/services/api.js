@@ -60,7 +60,7 @@ export const grievanceApi = {
     api.get(`/api/v1/grievances/${encodeURIComponent(referenceId)}/track`, {
       headers: { 'X-Citizen-Access-Token': token },
     }),
-  uploadDocument: (referenceId, file, citizenToken) => {
+  uploadDocument: (referenceId, file, citizenToken, onUploadProgress) => {
     const formData = new FormData();
     formData.append('file', file);
     return api.post(
@@ -70,6 +70,7 @@ export const grievanceApi = {
         headers: citizenToken
           ? { 'X-Citizen-Access-Token': citizenToken }
           : undefined,
+        onUploadProgress,
       },
     );
   },

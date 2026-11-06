@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Alert from '../../components/Alert';
+import Icon from '../../components/Icon';
 import StatusBadge from '../../components/StatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { getErrorMessage, grievanceApi } from '../../services/api';
@@ -29,7 +30,19 @@ const NEXT_STATUSES = {
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 
 function displayDate(value) {
-  return value ? new Date(value).toLocaleString() : '—';
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+}
+
+function auditActionLabel(action) {
+  const labels = {
+    'grievance.submitted': 'Grievance submitted',
+    'grievance.reviewed': 'Staff review recorded',
+    'grievance.status_changed': 'Status updated',
+    'grievance.document_uploaded': 'Supporting document attached',
+  };
+  return labels[action] || String(action || 'Case activity').replaceAll('.', ' ').replaceAll('_', ' ');
 }
 
 export default function GrievanceDetails() {
@@ -50,6 +63,9 @@ export default function GrievanceDetails() {
     department: '',
   });
   const canEdit = user?.role === 'ADMIN' || user?.role === 'OFFICER';
+  const availableDepartments = user?.role === 'OFFICER' && user.department
+    ? DEPARTMENTS.filter((department) => department.code === user.department.code)
+    : DEPARTMENTS;
 
   const loadGrievance = useCallback(async () => {
     // Load case data and its audit history independently so audit failures are visible.
@@ -109,6 +125,12 @@ export default function GrievanceDetails() {
         }),
       });
       setGrievance(data);
+      setReview({
+        category: data.officer_approved?.category || data.ai_suggestion?.category || '',
+        subcategory: data.officer_approved?.subcategory || data.ai_suggestion?.subcategory || '',
+        priority: data.officer_approved?.priority || data.ai_suggestion?.suggested_priority || '',
+        department: data.officer_approved?.department?.code || data.recommended_department?.code || '',
+      });
       setSuccess('Officer-approved values have been saved. Original AI suggestions are unchanged.');
       await refreshAuditOnly();
     } catch (saveError) {
@@ -131,6 +153,12 @@ export default function GrievanceDetails() {
 
   async function updateStatus(nextStatus) {
     // Ask the backend to validate the requested workflow transition.
+    if (
+      ['RESOLVED', 'REJECTED', 'CLOSED'].includes(nextStatus) &&
+      !window.confirm(`Confirm changing this grievance to ${nextStatus.replaceAll('_', ' ').toLowerCase()}?`)
+    ) {
+      return;
+    }
     setSavingStatus(true);
     setError('');
     setSuccess('');
@@ -166,11 +194,11 @@ export default function GrievanceDetails() {
       <Link className="back-link" to="/dashboard">← Back to grievances</Link>
       <div className="page-heading-row detail-heading">
         <div>
-          <span className="eyebrow">GRIEVANCE RECORD</span>
+          <span className="eyebrow">CASE MANAGEMENT / GRIEVANCE RECORD</span>
           <h1>{grievance.reference_id}</h1>
-          <p>Submitted {displayDate(grievance.created_at)}</p>
+          <p>Submitted {displayDate(grievance.created_at)} <span className="heading-separator">·</span> Last updated {displayDate(grievance.updated_at)}</p>
         </div>
-        <StatusBadge status={grievance.status} />
+        <div className="detail-heading-status"><StatusBadge status={grievance.status} /><span className={approved ? 'review-indicator reviewed' : 'review-indicator'}>{approved ? 'Staff values approved' : 'Awaiting staff review'}</span></div>
       </div>
       <Alert>{error}</Alert>
       {success && <Alert variant="success" onDismiss={() => setSuccess('')}>{success}</Alert>}
@@ -179,8 +207,7 @@ export default function GrievanceDetails() {
         <div className="detail-main-column">
           <section className="dashboard-panel detail-panel">
             <div className="panel-title-row">
-              <div><span className="eyebrow">CITIZEN SUBMISSION</span><h2>Complaint details</h2></div>
-              <span className="submission-date">{displayDate(grievance.created_at)}</span>
+              <div className="panel-title-icon"><span className="section-icon"><Icon name="user" /></span><div><span className="eyebrow">CITIZEN SUBMISSION</span><h2>Citizen and grievance information</h2></div></div>
             </div>
             <div className="citizen-contact-grid">
               <div><span>Citizen</span><strong>{grievance.citizen_details.full_name}</strong></div>
@@ -188,18 +215,19 @@ export default function GrievanceDetails() {
               <div><span>Email</span><strong>{grievance.citizen_details.email || 'Not provided'}</strong></div>
             </div>
             <div className="complaint-text">
-              <span className="detail-label">Complaint description</span>
+              <span className="detail-label">Grievance description</span>
               <p>{grievance.complaint_description}</p>
             </div>
           </section>
 
           <section className="dashboard-panel detail-panel">
             <div className="panel-title-row">
-              <div><span className="eyebrow">AI-ASSISTED CLASSIFICATION</span><h2>Recommendation</h2></div>
+              <div className="panel-title-icon"><span className="section-icon"><Icon name="activity" /></span><div><span className="eyebrow">AI-ASSISTED ANALYSIS</span><h2>Model suggestions</h2></div></div>
               <span className={`ai-state ${grievance.ai_processing_status === 'completed' ? 'ai-complete' : 'ai-manual'}`}>
-                {grievance.ai_processing_status === 'completed' ? 'Analysis complete' : 'Manual review'}
+                {grievance.ai_processing_status === 'completed' ? 'Suggestions available' : grievance.ai_processing_status === 'pending' ? 'Processing pending' : 'Manual review'}
               </span>
             </div>
+            <p className="panel-intro">These model-generated values are advisory only. They are not an administrative decision and do not assign a department.</p>
             {ai ? (
               <>
                 <div className="ai-recommendation-grid">
@@ -213,7 +241,7 @@ export default function GrievanceDetails() {
                     <strong className={`priority-label priority-${ai.suggested_priority}`}>{ai.suggested_priority}</strong>
                   </div>
                   <div className="ai-data-card">
-                    <span>Department recommendation</span>
+                    <span>Deterministic department mapping</span>
                     <strong>{grievance.recommended_department?.name || 'Manual assignment required'}</strong>
                   </div>
                   <div className="ai-data-card">
@@ -236,33 +264,33 @@ export default function GrievanceDetails() {
           {canEdit && (
             <section className="dashboard-panel detail-panel">
               <div className="panel-title-row">
-                <div><span className="eyebrow">HUMAN REVIEW</span><h2>Approved classification</h2></div>
-                <span className="human-review-mark">Staff decision</span>
+                <div className="panel-title-icon"><span className="section-icon"><Icon name="clipboard" /></span><div><span className="eyebrow">AUTHORIZED STAFF ACTION</span><h2>Officer review and correction</h2></div></div>
+                <span className="human-review-mark"><Icon name="check" size={14} /> Staff decision</span>
               </div>
               <p className="panel-intro">AI suggestions are advisory. Save the final values you approve; original suggestions remain preserved above.</p>
               <form className="review-form" onSubmit={saveReview}>
                 <label className="form-label-wrap">
-                  <span>Approved category</span>
+                  <span>Final category <b aria-hidden="true">*</b></span>
                   <input className="form-control" value={review.category} onChange={(event) => setReview((current) => ({ ...current, category: event.target.value }))} maxLength={80} required />
                 </label>
                 <label className="form-label-wrap">
-                  <span>Approved subcategory</span>
+                  <span>Final subcategory</span>
                   <input className="form-control" value={review.subcategory} onChange={(event) => setReview((current) => ({ ...current, subcategory: event.target.value }))} maxLength={80} />
                 </label>
                 <label className="form-label-wrap">
-                  <span>Approved priority</span>
+                  <span>Final priority <b aria-hidden="true">*</b></span>
                   <select className="form-select" value={review.priority} onChange={(event) => setReview((current) => ({ ...current, priority: event.target.value }))} required>
                     <option value="">Choose priority</option>
                     {PRIORITIES.map((priority) => <option key={priority} value={priority}>{priority[0].toUpperCase() + priority.slice(1)}</option>)}
                   </select>
                 </label>
                 <label className="form-label-wrap">
-                  <span>Department</span>
+                  <span>Assigned department <b aria-hidden="true">*</b></span>
                   <select className="form-select" value={review.department} onChange={(event) => setReview((current) => ({ ...current, department: event.target.value }))} required>
                     <option value="">Choose department</option>
-                    {DEPARTMENTS.map((department) => <option key={department.code} value={department.code}>{department.name}</option>)}
+                    {availableDepartments.map((department) => <option key={department.code} value={department.code}>{department.name}</option>)}
                   </select>
-                  {user?.role === 'OFFICER' && <small className="field-note">Your department assignment controls which cases you can access.</small>}
+                  {user?.role === 'OFFICER' && <small className="field-note">Your account is limited to {user.department?.name || 'its assigned department'}.</small>}
                 </label>
                 <div className="review-footer">
                   <div className="approved-summary">
@@ -279,33 +307,34 @@ export default function GrievanceDetails() {
         <aside className="detail-side-column">
           <section className="dashboard-panel detail-panel">
             <div className="panel-title-row compact-panel-title">
-              <div><span className="eyebrow">CASE CONTROL</span><h2>Status</h2></div>
+              <div className="panel-title-icon"><span className="section-icon"><Icon name="activity" /></span><div><span className="eyebrow">CASE CONTROL</span><h2>Status management</h2></div></div>
             </div>
             <div className="current-status"><StatusBadge status={grievance.status} /></div>
             {canEdit && NEXT_STATUSES[grievance.status]?.length > 0 && (
               <div className="status-actions">
-                <span className="detail-label">Move case to</span>
+                <span className="detail-label">Available next actions</span>
                 {NEXT_STATUSES[grievance.status].map((next) => (
-                  <button key={next} type="button" className={`btn ${next === 'REJECTED' ? 'btn-outline-danger' : 'btn-outline-primary'} w-100`} disabled={savingStatus} onClick={() => updateStatus(next)}>
-                    {savingStatus ? 'Updating…' : next.replaceAll('_', ' ')}
+                  <button key={next} type="button" className={`btn ${['REJECTED', 'CLOSED'].includes(next) ? 'btn-outline-danger' : 'btn-outline-primary'} w-100`} disabled={savingStatus} onClick={() => updateStatus(next)}>
+                    {savingStatus ? 'Updating…' : <>Set to {next.replaceAll('_', ' ').toLowerCase()} <Icon name="arrowRight" size={16} /></>}
                   </button>
                 ))}
               </div>
             )}
+            {canEdit && NEXT_STATUSES[grievance.status]?.length === 0 && <div className="inline-empty">This case is closed. There are no further status transitions.</div>}
             <div className="status-updated">Last updated<br /><strong>{displayDate(grievance.updated_at)}</strong></div>
           </section>
 
           <section className="dashboard-panel detail-panel">
             <div className="panel-title-row compact-panel-title">
-              <div><span className="eyebrow">ATTACHMENTS</span><h2>Supporting documents</h2></div>
+              <div className="panel-title-icon"><span className="section-icon"><Icon name="file" /></span><div><span className="eyebrow">ATTACHMENTS</span><h2>Supporting documents</h2></div></div>
             </div>
             {grievance.supporting_documents?.length ? (
               <div className="document-list">
                 {grievance.supporting_documents.map((document) => (
                   <a key={document.cloudinary_public_id} href={document.secure_url} target="_blank" rel="noreferrer" className="document-item">
-                    <span className="document-icon">▤</span>
+                    <span className="document-icon"><Icon name="file" size={17} /></span>
                     <span><strong>{document.original_filename}</strong><small>{(document.size_bytes / 1024 / 1024).toFixed(2)} MB · {document.format.toUpperCase()}</small></span>
-                    <span className="document-open">↗</span>
+                    <span className="document-open"><Icon name="arrowUpRight" size={16} /></span>
                   </a>
                 ))}
               </div>
@@ -314,7 +343,7 @@ export default function GrievanceDetails() {
 
           <section className="dashboard-panel detail-panel">
             <div className="panel-title-row compact-panel-title">
-              <div><span className="eyebrow">CASE HISTORY</span><h2>Audit trail</h2></div>
+              <div className="panel-title-icon"><span className="section-icon"><Icon name="clock" /></span><div><span className="eyebrow">CASE HISTORY</span><h2>Audit history</h2></div></div>
             </div>
             {auditUnavailable ? (
               <div className="inline-empty">Audit history is unavailable for this account or service.</div>
@@ -324,11 +353,16 @@ export default function GrievanceDetails() {
                   <article className="audit-event" key={`${entry.action}-${entry.created_at}`}>
                     <span className="audit-point" />
                     <div className="audit-event-heading">
-                      <strong>{entry.action.replaceAll('.', ' ').replaceAll('_', ' ')}</strong>
+                      <strong>{auditActionLabel(entry.action)}</strong>
                       <time>{displayDate(entry.created_at)}</time>
                     </div>
                     <span className="audit-actor">{entry.actor.actor_type}{entry.actor.actor_id ? ` · ${entry.actor.actor_id.slice(-6)}` : ''}</span>
-                    {entry.new_values && <pre>{JSON.stringify(entry.new_values, null, 2)}</pre>}
+                    {(entry.previous_values || entry.new_values) && (
+                      <div className="audit-changes">
+                        {entry.previous_values && <div><span>Previous values</span><pre>{JSON.stringify(entry.previous_values, null, 2)}</pre></div>}
+                        {entry.new_values && <div><span>Recorded values</span><pre>{JSON.stringify(entry.new_values, null, 2)}</pre></div>}
+                      </div>
+                    )}
                   </article>
                 ))}
               </div>
@@ -336,7 +370,7 @@ export default function GrievanceDetails() {
           </section>
         </aside>
       </div>
-      <div className="dashboard-footnote">Prototype service · Case information is visible only to authorized staff and the citizen access code holder.</div>
+      <div className="dashboard-footnote"><Icon name="shield" size={15} /> Prototype service · Case access is enforced by the backend according to staff role and department.</div>
     </div>
   );
 }

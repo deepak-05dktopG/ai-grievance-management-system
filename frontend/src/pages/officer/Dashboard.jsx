@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Alert from '../../components/Alert';
+import Icon from '../../components/Icon';
 import StatusBadge from '../../components/StatusBadge';
 import { useAuth } from '../../context/AuthContext';
 import { getErrorMessage, grievanceApi } from '../../services/api';
@@ -29,6 +30,14 @@ const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 
 function greetingName(user) {
   return user?.name?.trim().split(/\s+/)[0] || 'there';
+}
+
+function displayDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export default function Dashboard() {
@@ -80,7 +89,8 @@ export default function Dashboard() {
       );
     } catch (loadError) {
       setError(getErrorMessage(loadError));
-      setResult((current) => ({ ...current, items: [] }));
+      setResult({ items: [], total: 0, pages: 0, page_size: 20 });
+      setStats({});
     } finally {
       setLoading(false);
     }
@@ -101,47 +111,48 @@ export default function Dashboard() {
   }
 
   const statCards = [
-    { key: 'SUBMITTED', eyebrow: 'NEW CASES', tone: 'sage', glyph: '◷' },
-    { key: 'UNDER_REVIEW', eyebrow: 'NEEDS REVIEW', tone: 'blue', glyph: '⌕' },
-    { key: 'IN_PROGRESS', eyebrow: 'IN PROGRESS', tone: 'amber', glyph: '↗' },
-    { key: 'RESOLVED', eyebrow: 'RESOLVED', tone: 'green', glyph: '✓' },
+    { key: 'SUBMITTED', eyebrow: 'NEW SUBMISSIONS', tone: 'sage', icon: 'file' },
+    { key: 'UNDER_REVIEW', eyebrow: 'UNDER REVIEW', tone: 'blue', icon: 'search' },
+    { key: 'IN_PROGRESS', eyebrow: 'IN PROGRESS', tone: 'amber', icon: 'activity' },
+    { key: 'RESOLVED', eyebrow: 'RESOLVED', tone: 'green', icon: 'check' },
   ];
 
   return (
     <div className="dashboard-page">
       <div className="page-heading-row">
         <div>
-          <span className="eyebrow">OVERVIEW</span>
-          <h1>Good morning, {greetingName(user)}</h1>
-          <p>Here’s the latest view of public grievances in your workspace.</p>
+          <span className="eyebrow">CASE WORKSPACE</span>
+          <h1>Good day, {greetingName(user)}</h1>
+          <p>Review and manage grievances{user?.department?.name ? ` for ${user.department.name}` : ' across the service'}.</p>
         </div>
-        <div className="date-chip"><span>◷</span> {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>
+        <div className="date-chip"><Icon name="clock" size={17} /> {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>
       </div>
 
-      <div className="stats-grid">
+      <section className="stats-grid" aria-label="Grievance status totals">
         {statCards.map((card) => (
           <article className="stat-card" key={card.key}>
-            <div className={`stat-icon ${card.tone}`}>{card.glyph}</div>
+            <div className={`stat-icon ${card.tone}`}><Icon name={card.icon} size={19} /></div>
             <div className="stat-card-copy">
               <span>{card.eyebrow}</span>
               <strong>{stats[card.key]?.total ?? '—'}</strong>
-              <small>{stats[card.key]?.label || ''}</small>
+              <small>Cases in this status</small>
             </div>
           </article>
         ))}
-      </div>
+      </section>
 
-      <section className="dashboard-panel">
+      <section className="dashboard-panel register-panel" aria-labelledby="register-title">
         <div className="panel-title-row">
           <div>
-            <span className="eyebrow">CASE MANAGEMENT</span>
-            <h2>Grievance register</h2>
+            <span className="eyebrow">CASE REGISTER</span>
+            <h2 id="register-title">Grievances</h2>
+            <p className="panel-subtitle">Filter the cases available to your account. Results are ordered by submission date.</p>
           </div>
-          <span className="record-count">{result.total} {result.total === 1 ? 'record' : 'records'}</span>
+          <span className="record-count">{result.total} {result.total === 1 ? 'case' : 'cases'}</span>
         </div>
         <div className="filters-row">
           <label className="filter-control">
-            <span>Status</span>
+            <span>Filter by status</span>
             <select className="form-select" name="status" value={filters.status} onChange={changeFilter}>
               <option value="">All statuses</option>
               {STATUSES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
@@ -149,7 +160,7 @@ export default function Dashboard() {
             </select>
           </label>
           <label className="filter-control">
-            <span>Priority</span>
+            <span>Filter by priority</span>
             <select className="form-select" name="priority" value={filters.priority} onChange={changeFilter}>
               <option value="">All priorities</option>
               {PRIORITIES.map((priority) => <option key={priority} value={priority}>{priority[0].toUpperCase() + priority.slice(1)}</option>)}
@@ -157,42 +168,49 @@ export default function Dashboard() {
           </label>
           {!isOfficer && (
             <label className="filter-control">
-              <span>Department</span>
+              <span>Filter by department</span>
               <select className="form-select" name="department" value={filters.department} onChange={changeFilter}>
                 <option value="">All departments</option>
                 {DEPARTMENTS.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
               </select>
             </label>
           )}
-          {isOfficer && <div className="department-lock"><span>◈</span> {user?.department?.name || 'Assigned department'}</div>}
-          {activeFilters > 0 && <button className="btn btn-link clear-filters" type="button" onClick={clearFilters}>Clear filters</button>}
+          {isOfficer && <div className="department-lock"><Icon name="lock" size={16} /> {user?.department?.name || 'Assigned department'}</div>}
+          {activeFilters > 0 && <button className="btn btn-link clear-filters" type="button" onClick={clearFilters}>Clear filters ({activeFilters})</button>}
           <button className="btn btn-outline-primary btn-sm refresh-button" type="button" onClick={loadData} disabled={loading}>
-            <span className={loading ? 'refresh-glyph spin' : 'refresh-glyph'}>↻</span> Refresh
+            <Icon name="refresh" className={loading ? 'spin' : ''} size={16} /> Refresh
           </button>
         </div>
 
         <Alert>{error}</Alert>
+        {error && !loading && (
+          <div className="dashboard-retry-row">
+            <span>Unable to load current case data.</span>
+            <button type="button" className="btn btn-outline-primary btn-sm" onClick={loadData}>Try again</button>
+          </div>
+        )}
         {loading ? (
-          <div className="table-state"><span className="spinner-border spinner-border-sm" /> Loading grievances…</div>
+          <div className="table-state" role="status"><span className="spinner-border spinner-border-sm" /> Loading grievance register…</div>
         ) : result.items.length === 0 ? (
           <div className="table-state empty-state">
-            <span className="empty-state-icon">⌕</span>
-            <strong>{activeFilters ? 'No matching grievances' : 'No grievances yet'}</strong>
-            <span>{activeFilters ? 'Try adjusting or clearing the filters.' : 'Submitted cases will appear here.'}</span>
+            <span className="empty-state-icon"><Icon name="clipboard" size={22} /></span>
+            <strong>{activeFilters ? 'No cases match these filters' : 'No grievances to display'}</strong>
+            <span>{activeFilters ? 'Change or clear a filter to see other cases.' : 'New submissions will appear here when available.'}</span>
           </div>
         ) : (
-          <div className="table-responsive">
+          <>
+          <div className="table-responsive desktop-register">
             <table className="table grievance-table">
               <thead>
                 <tr>
-                  <th>Reference</th>
-                  <th>Citizen</th>
+                  <th>Reference ID</th>
+                  <th>Concern</th>
                   <th>Category</th>
                   <th>Department</th>
                   <th>Priority</th>
                   <th>Status</th>
                   <th>Submitted</th>
-                  <th><span className="visually-hidden">Open</span></th>
+                  <th><span className="visually-hidden">Case actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -200,34 +218,57 @@ export default function Dashboard() {
                   const department = grievance.officer_approved?.department || grievance.recommended_department;
                   const priority = grievance.officer_approved?.priority || grievance.ai_suggestion?.suggested_priority;
                   const category = grievance.officer_approved?.category || grievance.ai_suggestion?.category || 'Pending review';
+                  const description = grievance.ai_suggestion?.summary || grievance.complaint_description;
                   return (
                     <tr key={grievance.reference_id}>
                       <td><Link className="reference-link" to={`/dashboard/grievances/${grievance.reference_id}`}>{grievance.reference_id}</Link></td>
-                      <td><span className="citizen-name">{grievance.citizen_details.full_name}</span></td>
+                      <td><span className="concern-excerpt">{description}</span></td>
                       <td>{category}</td>
                       <td>{department?.name || <span className="text-muted">Unassigned</span>}</td>
                       <td>{priority ? <span className={`priority-label priority-${priority}`}>{priority}</span> : <span className="text-muted">—</span>}</td>
                       <td><StatusBadge status={grievance.status} /></td>
-                      <td>{new Date(grievance.created_at).toLocaleDateString()}</td>
-                      <td><Link className="table-open" to={`/dashboard/grievances/${grievance.reference_id}`} aria-label={`Open ${grievance.reference_id}`}>→</Link></td>
+                      <td>{displayDate(grievance.created_at)}</td>
+                      <td><Link className="table-open" to={`/dashboard/grievances/${grievance.reference_id}`} aria-label={`Open case ${grievance.reference_id}`}><Icon name="arrowUpRight" size={17} /></Link></td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
+          <div className="mobile-register" aria-label="Grievances">
+            {result.items.map((grievance) => {
+              const department = grievance.officer_approved?.department || grievance.recommended_department;
+              const priority = grievance.officer_approved?.priority || grievance.ai_suggestion?.suggested_priority;
+              const category = grievance.officer_approved?.category || grievance.ai_suggestion?.category || 'Pending review';
+              const description = grievance.ai_suggestion?.summary || grievance.complaint_description;
+              return (
+                <article className="mobile-case-card" key={grievance.reference_id}>
+                  <div className="mobile-case-topline"><Link className="reference-link" to={`/dashboard/grievances/${grievance.reference_id}`}>{grievance.reference_id}</Link><StatusBadge status={grievance.status} /></div>
+                  <p>{description}</p>
+                  <dl>
+                    <div><dt>Category</dt><dd>{category}</dd></div>
+                    <div><dt>Department</dt><dd>{department?.name || 'Unassigned'}</dd></div>
+                    <div><dt>Priority</dt><dd>{priority ? <span className={`priority-label priority-${priority}`}>{priority}</span> : '—'}</dd></div>
+                    <div><dt>Submitted</dt><dd>{displayDate(grievance.created_at)}</dd></div>
+                  </dl>
+                  <Link className="mobile-case-open" to={`/dashboard/grievances/${grievance.reference_id}`}>View case <Icon name="arrowRight" size={16} /></Link>
+                </article>
+              );
+            })}
+          </div>
+          </>
         )}
         {result.pages > 1 && (
           <div className="pagination-row">
             <span>Page {page} of {result.pages}</span>
             <div>
-              <button className="btn btn-outline-secondary btn-sm" type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => current - 1)}>Previous</button>
-              <button className="btn btn-outline-secondary btn-sm" type="button" disabled={page >= result.pages || loading} onClick={() => setPage((current) => current + 1)}>Next</button>
+              <button className="btn btn-outline-primary btn-sm" type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => current - 1)}><Icon name="arrowLeft" size={15} /> Previous</button>
+              <button className="btn btn-outline-primary btn-sm" type="button" disabled={page >= result.pages || loading} onClick={() => setPage((current) => current + 1)}>Next <Icon name="arrowRight" size={15} /></button>
             </div>
           </div>
         )}
       </section>
-      <div className="dashboard-footnote">AI-generated suggestions are advisory only. Authorized staff retain responsibility for all case decisions.</div>
+      <div className="dashboard-footnote"><Icon name="shield" size={15} /> AI-generated suggestions are advisory. Authorized staff retain responsibility for all case decisions.</div>
     </div>
   );
 }

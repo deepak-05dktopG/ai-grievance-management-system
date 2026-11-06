@@ -3,6 +3,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Brand from '../components/Brand';
+import Icon from '../components/Icon';
 
 export default function AppShell() {
   const { user, logout } = useAuth();
@@ -20,24 +21,24 @@ export default function AppShell() {
         <NavLink to="/dashboard" className="sidebar-brand">
           <Brand />
         </NavLink>
-        <div className="sidebar-section-label">Workspace</div>
+        <p className="sidebar-section-label">Case workspace</p>
         <nav className="sidebar-nav" aria-label="Main navigation">
           <NavLink to="/dashboard" end className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            <span className="nav-glyph">▦</span>
+            <Icon name="grid" className="nav-glyph" />
             <span>Overview</span>
           </NavLink>
           {user?.role === 'ADMIN' && (
             <NavLink to="/dashboard/users" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-              <span className="nav-glyph">♙</span>
+              <Icon name="users" className="nav-glyph" />
               <span>User management</span>
             </NavLink>
           )}
         </nav>
         <div className="sidebar-footer">
-          <div className="sidebar-footer-icon">i</div>
+          <div className="sidebar-footer-icon"><Icon name="shield" size={17} /></div>
           <div>
-            <strong>Prototype workspace</strong>
-            <span>For assessment use</span>
+            <strong>Demonstration environment</strong>
+            <span>Prototype · synthetic data</span>
           </div>
         </div>
       </aside>
@@ -45,9 +46,12 @@ export default function AppShell() {
       <div className="dashboard-main">
         <header className="topbar">
           <div className="topbar-context">
-            <span className="topbar-kicker">District administration</span>
-            <span className="topbar-divider">/</span>
-            <span className="topbar-role">{user?.role === 'ADMIN' ? 'Administrator' : 'Officer'} portal</span>
+            <NavLink to="/dashboard" className="mobile-brand" aria-label="Creditfix workspace home">
+              <Brand compact />
+            </NavLink>
+            <span className="topbar-kicker">Grievance management</span>
+            <span className="topbar-divider" aria-hidden="true">/</span>
+            <span className="topbar-role">{user?.role === 'ADMIN' ? 'Administrator' : 'Officer'} workspace</span>
           </div>
           <div className="topbar-user">
             <div className="avatar">{user?.name?.slice(0, 1)?.toUpperCase() || 'U'}</div>
@@ -55,11 +59,24 @@ export default function AppShell() {
               <strong>{user?.name}</strong>
               <span>{user?.department?.name || 'Administration'}</span>
             </div>
-            <button type="button" className="btn btn-quiet btn-sm" onClick={handleLogout}>
-              Sign out
+            <button type="button" className="btn btn-quiet btn-sm sign-out-button" onClick={handleLogout}>
+              <Icon name="logout" size={17} />
+              <span>Sign out</span>
             </button>
           </div>
         </header>
+        <nav className="mobile-nav" aria-label="Mobile main navigation">
+          <NavLink to="/dashboard" end className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`}>
+            <Icon name="grid" size={19} />
+            <span>Overview</span>
+          </NavLink>
+          {user?.role === 'ADMIN' && (
+            <NavLink to="/dashboard/users" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`}>
+              <Icon name="users" size={19} />
+              <span>Accounts</span>
+            </NavLink>
+          )}
+        </nav>
         <main className="dashboard-content">
           <Outlet />
         </main>
