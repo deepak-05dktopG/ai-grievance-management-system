@@ -2,6 +2,16 @@
 
 A prototype web application for submitting and managing public grievances in a hypothetical Indian district administration. Citizens can submit and track a case; authorized officers can review, update, and audit cases. Groq provides advisory classification, while department assignment remains deterministic.
 
+## Assessment Links and Documents
+
+| Resource | Link |
+|---|---|
+| **Live prototype** | [Open the deployed assessment prototype](https://ai-grievance-management-system-delta.vercel.app/) |
+| **Presentation slides** | [View the project presentation](https://drive.google.com/file/d/1zcwEwgwTd1StKzZIp-xCFkBgr26515t2/view?usp=sharing) |
+| **Project repository** | [deepak-05dktopG/ai-grievance-management-system](https://github.com/deepak-05dktopG/ai-grievance-management-system) |
+| **Project document** | [AI-enabled district administration (PDF)](./ai_enabled_district_administration.pdf) |
+| **Backend architecture and interview guide** | [Read the backend guide](./backend/BACKEND_ARCHITECTURE_AND_INTERVIEW.md) |
+
 > **Prototype notice:** This project uses synthetic data and is not connected to actual government systems. It has not been prepared or audited as a production service.
 
 ## Project Overview
