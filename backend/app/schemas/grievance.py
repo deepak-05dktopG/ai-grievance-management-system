@@ -26,9 +26,9 @@ class GrievanceResponse(GrievanceDocument):
 
 
 class GrievanceSubmissionResponse(GrievanceResponse):
-    """Initial submission response, including the citizen's one-time access token."""
+    """Initial submission response, including the citizen's one-time tracking code."""
 
-    citizen_access_token: str
+    citizen_tracking_code: str
 
 
 class GrievanceTrackingResponse(MongoModel):

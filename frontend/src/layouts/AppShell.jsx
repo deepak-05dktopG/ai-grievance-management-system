@@ -46,7 +46,7 @@ export default function AppShell() {
       <div className="dashboard-main">
         <header className="topbar">
           <div className="topbar-context">
-            <NavLink to="/dashboard" className="mobile-brand" aria-label="Creditfix workspace home">
+            <NavLink to="/dashboard" className="mobile-brand" aria-label="Tamil Nadu grievance workspace home">
               <Brand compact />
             </NavLink>
             <span className="topbar-kicker">Grievance management</span>

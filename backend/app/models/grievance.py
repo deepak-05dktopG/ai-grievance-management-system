@@ -202,7 +202,7 @@ class GrievanceDocument(TimestampedModel):
         repr=False,
         exclude=True,
     )
-    citizen_access_token: str | None = Field(
+    citizen_tracking_code: str | None = Field(
         default=None,
         repr=False,
         exclude=True,

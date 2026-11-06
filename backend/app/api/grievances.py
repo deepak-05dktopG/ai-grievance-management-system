@@ -42,6 +42,7 @@ from app.services.grievance_management import (
     create_grievance,
     get_grievance_by_reference,
     get_citizen_tracking,
+    get_citizen_tracking_by_code,
     list_grievance_audit_logs,
     list_grievance_page,
     review_grievance,
@@ -88,12 +89,12 @@ def submit_grievance(
     request: GrievanceCreateRequest,
     database: Annotated[Database, Depends(get_database)],
 ) -> GrievanceSubmissionResponse:
-    """Create and return a citizen grievance with its tracking credentials.
+    """Create and return a citizen grievance with its single tracking code.
 
     Steps: validate the request, call the management service to classify and
     persist the case plus its audit record, then return the reference and the
-    one-time citizen token. The service stores only the token hash; the plaintext
-    token is exposed only in this initial response for later tracking/uploads.
+    one-time tracking code. The service stores only the code hash; its plaintext
+    is exposed only in this initial response for tracking and document uploads.
     """
     try:
         grievance = create_grievance(database, request)
@@ -102,12 +103,33 @@ def submit_grievance(
             by_alias=True,
             exclude_none=True,
         )
-        response["citizen_access_token"] = grievance.citizen_access_token
+        response["citizen_tracking_code"] = grievance.citizen_tracking_code
         return GrievanceSubmissionResponse.model_validate(response)
     except ReferenceIdConflictError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Could not allocate a unique grievance reference",
+        ) from None
+
+
+@router.get(
+    "/track",
+    response_model=GrievanceTrackingResponse,
+)
+def track_grievance_by_code(
+    database: Annotated[Database, Depends(get_database)],
+    tracking_code: Annotated[
+        str,
+        Header(alias="X-Citizen-Tracking-Code", min_length=8, max_length=64),
+    ],
+) -> GrievanceTrackingResponse:
+    """Return limited case progress using the single code issued on submission."""
+    try:
+        return get_citizen_tracking_by_code(database, tracking_code)
+    except InvalidCitizenAccessTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired citizen tracking code",
         ) from None
 
 

@@ -117,6 +117,7 @@ app.add_middleware(
         "Authorization",
         "Content-Type",
         "X-Citizen-Access-Token",
+        "X-Citizen-Tracking-Code",
     ],
 )
 app.include_router(health_router)

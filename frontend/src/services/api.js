@@ -56,9 +56,9 @@ export const grievanceApi = {
   submit: (payload) => api.post('/api/v1/grievances', payload, { timeout: 65000 }),
   list: (params) => api.get('/api/v1/grievances', { params }),
   get: (referenceId) => api.get(`/api/v1/grievances/${encodeURIComponent(referenceId)}`),
-  track: (referenceId, token) =>
-    api.get(`/api/v1/grievances/${encodeURIComponent(referenceId)}/track`, {
-      headers: { 'X-Citizen-Access-Token': token },
+  track: (trackingCode) =>
+    api.get('/api/v1/grievances/track', {
+      headers: { 'X-Citizen-Tracking-Code': trackingCode },
     }),
   uploadDocument: (referenceId, file, citizenToken, onUploadProgress) => {
     const formData = new FormData();

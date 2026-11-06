@@ -8,10 +8,10 @@ A prototype web application for submitting and managing public grievances in a h
 
 District administrations receive complaints across multiple departments and need a consistent way to capture submissions, route them for review, communicate progress, and preserve decision history. This prototype provides a shared intake and case-management workflow:
 
-1. A citizen submits a complaint and receives a reference ID and private access code.
+1. A citizen submits a complaint and receives a single private tracking code.
 2. The backend requests an AI classification when Groq is configured, then maps a supported category to a department using fixed rules.
 3. Authorized staff view cases within their access scope, record approved values, and update case status.
-4. Citizens use their private access code to see limited status and timestamp information.
+4. Citizens use the tracking code to see limited status and timestamp information.
 
 AI output is advisory only. Authorized staff retain responsibility for case decisions.
 
@@ -23,7 +23,7 @@ AI output is advisory only. Authorized staff retain responsibility for case deci
 - Confidence estimate and explanation accompanying the suggestion.
 - Deterministic category-to-department recommendation.
 - Officer review and corrections stored separately from AI suggestions.
-- Citizen tracking using a grievance-specific access code.
+- Citizen tracking using one random, grievance-specific tracking code.
 - PDF, JPG/JPEG, and PNG supporting-document uploads through Cloudinary.
 - Audit events for grievance submission, review, status changes, and document uploads.
 - JWT authentication and role/department-based staff access control.
@@ -84,10 +84,10 @@ flowchart TD
     G -->|No| E
     H --> I[Save grievance and submission audit event]
     E --> I
-    I --> J[Return reference ID and private citizen access code]
+    I --> J[Return one-time tracking code]
     J --> K[Authorized officer reviews and may correct suggestion]
     K --> L[Officer updates status; audit event is recorded]
-    L --> M[Citizen tracks status with private access code]
+    L --> M[Citizen tracks status with the single code]
 ```
 
 ## Technology Stack
@@ -278,7 +278,7 @@ The seed command creates a missing account and does not reset an existing admin 
 
 ## API Documentation
 
-All API routes are defined under `/api/v1` except `/health`. Staff endpoints use a bearer JWT unless stated otherwise. The citizen tracking and citizen document-upload flows use the `X-Citizen-Access-Token` header returned once at submission.
+All API routes are defined under `/api/v1` except `/health`. Staff endpoints use a bearer JWT unless stated otherwise. Citizen tracking uses the `X-Citizen-Tracking-Code` header. The one-time code returned at submission is also used for citizen document uploads through `X-Citizen-Access-Token`.
 
 ### Health
 
@@ -298,8 +298,9 @@ All API routes are defined under `/api/v1` except `/health`. Staff endpoints use
 
 | Method | Endpoint | Purpose | Authentication |
 |---|---|---|---|
-| `POST` | `/api/v1/grievances` | Submit a grievance; returns its reference and one-time citizen access code. | Public |
-| `GET` | `/api/v1/grievances/{reference_id}/track` | Return limited case status, review flag, and timestamps. | Citizen access code in `X-Citizen-Access-Token` |
+| `POST` | `/api/v1/grievances` | Submit a grievance; returns its reference and one-time tracking code. | Public |
+| `GET` | `/api/v1/grievances/track` | Return limited case status, review flag, and timestamps. | Tracking code in `X-Citizen-Tracking-Code` |
+| `GET` | `/api/v1/grievances/{reference_id}/track` | Legacy tracking route retained for earlier submissions. | Earlier citizen token in `X-Citizen-Access-Token` |
 | `GET` | `/api/v1/grievances` | List/filter cases with pagination; officers are limited to their department. | Staff JWT |
 | `GET` | `/api/v1/grievances/{reference_id}` | Retrieve a case subject to staff role/department access. | Staff JWT |
 | `PATCH` | `/api/v1/grievances/{reference_id}/review` | Record officer-approved category/subcategory/priority/department separately from AI output. | Staff JWT, department access enforced |
@@ -318,7 +319,7 @@ The status values defined by the backend are `SUBMITTED`, `UNDER_REVIEW`, `IN_PR
 
 | Role | Actual access |
 |---|---|
-| Citizen | Submit a grievance without an account. A submission's private access code permits limited tracking and uploads only for that grievance, until token expiry (30 days). |
+| Citizen | Submit a grievance without an account. A submission's private tracking code permits limited tracking and uploads only for that grievance, until expiry (30 days). |
 | Officer | Authenticate with JWT; list, retrieve, review, update status, view audit history, and upload documents only for cases in the officer's effective assigned department. |
 | Admin | Authenticate with JWT; access all grievances and create officer/admin accounts. The API does not provide a user-list endpoint. |
 
@@ -330,7 +331,7 @@ The application uses these MongoDB collections:
 
 | Collection | Contents |
 |---|---|
-| `grievances` | Citizen details, complaint, AI suggestion, AI processing status, deterministic department recommendation, separate officer-approved values, workflow status, supporting-document metadata, reference ID, timestamps, and a hash/expiry for the citizen access code. |
+| `grievances` | Citizen details, complaint, AI suggestion, AI processing status, deterministic department recommendation, separate officer-approved values, workflow status, supporting-document metadata, reference ID, timestamps, and a hash/expiry for the citizen tracking code. |
 | `users` | User name, normalized unique email, Argon2 password hash, role, optional department, active flag, and creation timestamp. |
 | `audit_logs` | Grievance reference and ObjectId, event action, actor type/ID, previous/new values, and event timestamp. |
 
@@ -341,7 +342,7 @@ Audit records relate to a grievance through its MongoDB ObjectId and public refe
 - Staff authentication uses JWT bearer tokens with a configured issuer, expiry, and HS256 signing key.
 - Passwords are hashed with Argon2; password hashes are not included in user API responses.
 - Staff authorization is enforced by backend dependencies and grievance department checks.
-- Citizen access codes are returned once, stored as SHA-256 hashes, compared safely, and expire after 30 days.
+- Citizen tracking codes are returned once, stored as SHA-256 hashes, and expire after 30 days.
 - Pydantic validates incoming API payloads and model output. File uploads enforce size, extension, MIME type, and file signature.
 - Important grievance actions are persisted in the audit collection.
 - Secrets belong in ignored backend `.env` files and must not be committed or placed in `VITE_` variables.

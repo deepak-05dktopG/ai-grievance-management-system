@@ -1,4 +1,4 @@
-// Shared Creditfix brand mark; preview with `npm run dev` from frontend.
+// Shared prototype service identity; preview with `npm run dev` from frontend.
 
 export default function Brand({ compact = false }) {
   return (
@@ -10,8 +10,8 @@ export default function Brand({ compact = false }) {
         </svg>
       </span>
       <span className="brand-copy">
-        <strong>Creditfix</strong>
-        {!compact && <small>Public grievance portal</small>}
+        <strong>Tamil Nadu</strong>
+        {!compact && <small>District grievance portal · Prototype</small>}
       </span>
     </div>
   );

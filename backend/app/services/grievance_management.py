@@ -14,6 +14,7 @@ from pymongo.errors import DuplicateKeyError
 from app.core.config import get_settings
 from app.database.grievances import (
     get_grievance,
+    get_grievance_by_citizen_token_hash,
     get_audit_logs,
     insert_audit_log,
     insert_grievance,
@@ -47,6 +48,7 @@ from app.services.reference_id import generate_grievance_reference_id
 logger = logging.getLogger(__name__)
 MAX_REFERENCE_ID_ATTEMPTS = 3
 MAX_PAGE_SIZE = 100
+TRACKING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 ALLOWED_STATUS_TRANSITIONS = {
     GrievanceStatus.SUBMITTED: {
@@ -155,6 +157,17 @@ def _insert_audit_event(
     )
 
 
+def generate_citizen_tracking_code() -> str:
+    """Create a copy-friendly code with 80 bits of cryptographic randomness."""
+    characters = "".join(
+        secrets.choice(TRACKING_CODE_ALPHABET) for _ in range(16)
+    )
+    return (
+        f"CFX-{characters[:4]}-{characters[4:8]}-"
+        f"{characters[8:12]}-{characters[12:]}"
+    )
+
+
 def create_grievance(
     database: Database,
     request: GrievanceCreateRequest,
@@ -167,12 +180,12 @@ def create_grievance(
     in one Mongo transaction, retrying only public-reference collisions.
     """
     grievance = GrievanceDocument(**request.model_dump())
-    citizen_access_token = secrets.token_urlsafe(32)
-    # Keep the one-time plaintext token only on this response model; persist its
-    # digest and expiry so a database read cannot reveal the issued credential.
-    grievance.citizen_access_token = citizen_access_token
+    citizen_tracking_code = generate_citizen_tracking_code()
+    # Keep the plaintext code only on the submission response model; persist its
+    # digest and expiry so ordinary database reads cannot reveal the credential.
+    grievance.citizen_tracking_code = citizen_tracking_code
     grievance.citizen_access_token_hash = hashlib.sha256(
-        citizen_access_token.encode("utf-8")
+        citizen_tracking_code.encode("utf-8")
     ).hexdigest()
     grievance.citizen_access_token_expires_at = utc_now() + timedelta(days=30)
     settings = get_settings()
@@ -238,6 +251,10 @@ def create_grievance(
                 )
                 raise ReferenceIdConflictError from None
             grievance.reference_id = generate_grievance_reference_id()
+            grievance.citizen_tracking_code = generate_citizen_tracking_code()
+            grievance.citizen_access_token_hash = hashlib.sha256(
+                grievance.citizen_tracking_code.encode("utf-8")
+            ).hexdigest()
     raise ReferenceIdConflictError
 
 
@@ -282,6 +299,41 @@ def get_citizen_tracking(
     AI explanation, or internal assignment data.
     """
     grievance = verify_citizen_access_token(database, reference_id, token)
+    return GrievanceTrackingResponse(
+        reference_id=grievance.reference_id,
+        status=grievance.status,
+        ai_processing_status=grievance.ai_processing_status.value,
+        officer_reviewed=grievance.officer_approved is not None,
+        created_at=grievance.created_at,
+        updated_at=grievance.updated_at,
+    )
+
+
+def get_citizen_tracking_by_code(
+    database: Database,
+    tracking_code: str,
+) -> GrievanceTrackingResponse:
+    """Resolve the single issued code and return only citizen-safe progress.
+
+    The submitted code is normalized and hashed before its stored digest is
+    looked up; the credential expiry is checked before any case data is returned.
+    """
+    normalized_code = tracking_code.strip()
+    if len(normalized_code) == 23 and normalized_code[:4].casefold() == "cfx-":
+        normalized_code = normalized_code.upper()
+    supplied_hash = hashlib.sha256(normalized_code.encode("utf-8")).hexdigest()
+    document = get_grievance_by_citizen_token_hash(database, supplied_hash)
+    expires_at = document.get("citizen_access_token_expires_at") if document else None
+    if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if (
+        document is None
+        or not isinstance(expires_at, datetime)
+        or expires_at <= utc_now()
+    ):
+        raise InvalidCitizenAccessTokenError
+
+    grievance = GrievanceDocument.model_validate(document)
     return GrievanceTrackingResponse(
         reference_id=grievance.reference_id,
         status=grievance.status,

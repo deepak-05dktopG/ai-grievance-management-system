@@ -32,6 +32,16 @@ def get_grievance(
     )
 
 
+def get_grievance_by_citizen_token_hash(
+    database: Database,
+    token_hash: str,
+) -> dict[str, Any] | None:
+    """Find a citizen grievance by the digest of its one-time tracking code."""
+    return database[GRIEVANCES_COLLECTION].find_one(
+        {"citizen_access_token_hash": token_hash}
+    )
+
+
 def get_audit_logs(database: Database, reference_id: str) -> list[dict[str, Any]]:
     """Load one case's audit trail from oldest to newest for chronological display."""
     return list(

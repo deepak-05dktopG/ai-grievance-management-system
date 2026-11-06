@@ -55,7 +55,7 @@ export default function LoginPage() {
             <div><Icon name="users" /><span><strong>Role-based access</strong><small>Officers see cases assigned to their department.</small></span></div>
           </div>
         </div>
-        <span className="login-footnote">Creditfix · Grievance management prototype</span>
+        <span className="login-footnote">Tamil Nadu · Grievance management prototype</span>
       </section>
       <section className="login-right" aria-labelledby="login-title">
         <Link to="/" className="mobile-login-brand"><Brand compact /></Link>

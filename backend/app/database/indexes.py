@@ -12,6 +12,16 @@ GRIEVANCE_INDEXES = (
         [("reference_id", ASCENDING)],
         {"name": "uq_grievance_reference_id", "unique": True},
     ),
+    (
+        [("citizen_access_token_hash", ASCENDING)],
+        {
+            "name": "uq_grievance_citizen_tracking_code",
+            "unique": True,
+            "partialFilterExpression": {
+                "citizen_access_token_hash": {"$type": "string"}
+            },
+        },
+    ),
     ([("status", ASCENDING)], {"name": "ix_grievance_status"}),
     (
         [("recommended_department.code", ASCENDING)],

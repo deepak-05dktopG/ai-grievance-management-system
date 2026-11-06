@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const LAST_TRACKING_CODE_KEY = 'creditfix_last_tracking_code';
 const TRACKING_PROGRESS = {
   SUBMITTED: 'Awaiting staff review',
   UNDER_REVIEW: 'Staff review in progress',
@@ -67,11 +68,13 @@ export default function CitizenPortal() {
   const [uploadProgress, setUploadProgress] = useState(null);
   const [failedUploads, setFailedUploads] = useState([]);
   const [retryingUploads, setRetryingUploads] = useState(false);
-  const [trackingReference, setTrackingReference] = useState('');
-  const [trackingToken, setTrackingToken] = useState('');
+  const [trackingCode, setTrackingCode] = useState(
+    () => sessionStorage.getItem(LAST_TRACKING_CODE_KEY) || '',
+  );
   const [tracking, setTracking] = useState(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
   const [trackingError, setTrackingError] = useState('');
+  const [copyMessage, setCopyMessage] = useState('');
 
   function updateField(event) {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
@@ -90,7 +93,7 @@ export default function CitizenPortal() {
 
   async function retryFailedUploads() {
     // Retry only files that failed after the grievance itself was saved.
-    if (!submission?.citizen_access_token || !failedUploads.length) return;
+    if (!submission?.citizen_tracking_code || !failedUploads.length) return;
     setRetryingUploads(true);
     setUploadMessage('');
     const remaining = [];
@@ -99,7 +102,7 @@ export default function CitizenPortal() {
         await grievanceApi.uploadDocument(
           submission.reference_id,
           file,
-          submission.citizen_access_token,
+          submission.citizen_tracking_code,
           (event) => {
             if (event.total) {
               setUploadProgress({
@@ -124,7 +127,7 @@ export default function CitizenPortal() {
   }
 
   async function handleSubmit(event) {
-    // Create the grievance first, then attach optional files with its access token.
+    // Create the grievance first, then attach optional files with its tracking code.
     event.preventDefault();
     setSubmitError('');
     setFieldError('');
@@ -140,13 +143,9 @@ export default function CitizenPortal() {
         complaint_description: form.complaint,
       });
       setSubmission(data);
-      setTrackingReference(data.reference_id);
-      setTrackingToken(data.citizen_access_token);
       setFailedUploads([]);
-      sessionStorage.setItem(
-        `creditfix_citizen_token:${data.reference_id}`,
-        data.citizen_access_token,
-      );
+      setTrackingCode(data.citizen_tracking_code);
+      sessionStorage.setItem(LAST_TRACKING_CODE_KEY, data.citizen_tracking_code);
       if (files.length) {
         const failures = [];
         for (const file of files) {
@@ -154,7 +153,7 @@ export default function CitizenPortal() {
             await grievanceApi.uploadDocument(
               data.reference_id,
               file,
-              data.citizen_access_token,
+              data.citizen_tracking_code,
               (event) => {
                 if (event.total) {
                   setUploadProgress({
@@ -194,37 +193,49 @@ export default function CitizenPortal() {
   }
 
   async function handleTrack(event) {
-    // Fetch limited case progress with the citizen's private grievance token.
+    // Fetch limited case progress using the single code issued on submission.
     event.preventDefault();
     setTrackingError('');
     setTracking(null);
     setTrackingLoading(true);
-    const token =
-      trackingToken ||
-      sessionStorage.getItem(`creditfix_citizen_token:${trackingReference.trim()}`);
-    if (!token) {
+    const code = trackingCode.trim();
+    if (!code) {
       setTrackingLoading(false);
-      setTrackingError('Enter the private access code provided when you submitted this grievance.');
+      setTrackingError('Enter the tracking code shown on your submission receipt.');
       return;
     }
     try {
-      const { data } = await grievanceApi.track(trackingReference.trim(), token);
+      const { data } = await grievanceApi.track(code);
       if (!data?.reference_id || !data?.status) {
         throw new Error('The tracking response was incomplete. Please try again later.');
       }
       setTracking(data);
-      setTrackingToken(token);
+      setTrackingCode(code);
+      sessionStorage.setItem(LAST_TRACKING_CODE_KEY, code);
     } catch (error) {
-      setTrackingError(getErrorMessage(error));
+      setTrackingError(
+        error.response?.status === 401
+          ? 'That tracking code is invalid or has expired. Check it and try again.'
+          : getErrorMessage(error),
+      );
     } finally {
       setTrackingLoading(false);
     }
   }
 
-  function copyAccessCode() {
-    // The access code is a bearer credential; only copy it when explicitly requested.
-    if (submission?.citizen_access_token) {
-      navigator.clipboard?.writeText(submission.citizen_access_token);
+  async function copyTrackingCode() {
+    // Copy the single tracking code so the citizen can save it for later.
+    if (!submission?.citizen_tracking_code) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard access is unavailable.');
+      }
+      await navigator.clipboard.writeText(
+        submission.citizen_tracking_code,
+      );
+      setCopyMessage('Tracking code copied. Store it somewhere private.');
+    } catch {
+      setCopyMessage('Could not copy automatically. Select and save the tracking code above.');
     }
   }
 
@@ -232,7 +243,7 @@ export default function CitizenPortal() {
     <div className="citizen-page">
       <header className="citizen-topbar">
         <div className="container citizen-topbar-inner">
-          <Link to="/" aria-label="Creditfix home" className="brand-link">
+          <Link to="/" aria-label="Tamil Nadu grievance portal home" className="brand-link">
             <Brand />
           </Link>
           <div className="public-service-label">
@@ -254,7 +265,7 @@ export default function CitizenPortal() {
             <h1>Tell us what needs<br />attention.</h1>
             <p>
               Submit a concern for review and keep track of its progress using
-              the reference ID and private access code provided to you.
+              the single tracking code provided on your receipt.
             </p>
             <div className="hero-actions">
               <a className="btn btn-primary" href="#submit">Submit a grievance <Icon name="arrowRight" size={18} /></a>
@@ -265,8 +276,8 @@ export default function CitizenPortal() {
             <div className="service-note-heading"><Icon name="clipboard" size={22} /><span>How the service works</span></div>
             <ol>
               <li><span>01</span><div><strong>Submit your concern</strong><small>Provide contact details and a clear description.</small></div></li>
-              <li><span>02</span><div><strong>Keep your reference safe</strong><small>Your private access code is required to track.</small></div></li>
-              <li><span>03</span><div><strong>Check case progress</strong><small>Use both credentials to view the latest status.</small></div></li>
+              <li><span>02</span><div><strong>Save your tracking code</strong><small>One private code is all you need to check progress.</small></div></li>
+              <li><span>03</span><div><strong>Check case progress</strong><small>Enter the code to see the latest status.</small></div></li>
             </ol>
           </div>
         </div>
@@ -297,19 +308,19 @@ export default function CitizenPortal() {
                 <div className="success-medallion"><Icon name="check" size={27} /></div>
                 <span className="eyebrow">RECEIPT CONFIRMATION</span>
                 <h3>Thank you for reaching out.</h3>
-                <p>Your grievance has been recorded. Keep the details below private so you can securely track your case.</p>
-                <div className="reference-panel">
-                  <span>REFERENCE ID</span>
-                  <strong>{submission.reference_id}</strong>
-                </div>
+                <p>Your grievance has been recorded. Keep this code private; it is all you need to check case progress.</p>
                 <div className="access-code-panel">
                   <div>
-                    <span>PRIVATE ACCESS CODE</span>
-                    <strong>{submission.citizen_access_token}</strong>
+                    <span>SINGLE TRACKING CODE</span>
+                    <strong>{submission.citizen_tracking_code}</strong>
                   </div>
-                  <button type="button" className="btn btn-outline-primary btn-sm" onClick={copyAccessCode}>Copy</button>
+                  <button type="button" className="btn btn-outline-primary btn-sm" onClick={copyTrackingCode}>
+                    <Icon name="clipboard" size={15} /> Copy code
+                  </button>
                 </div>
-                <p className="privacy-hint">This code is shown only once and is needed with your reference ID for tracking and document uploads.</p>
+                <p className="privacy-hint" role="status">
+                  {copyMessage || 'Save this code. It is also remembered in this browser tab for the current session.'}
+                </p>
                 {uploadMessage && <Alert variant={failedUploads.length ? 'warning' : 'success'}>{uploadMessage}</Alert>}
                 {uploadProgress && (
                   <div className="upload-progress" role="status" aria-live="polite">
@@ -422,7 +433,7 @@ export default function CitizenPortal() {
                   )}
                 </label>
                 <div className="form-submit-row">
-                  <span className="privacy-hint">Your tracking reference and access code are private. Store them securely after submission.</span>
+                  <span className="privacy-hint">Your single tracking code is private. Store it securely after submission.</span>
                   <button className="btn btn-primary" type="submit" disabled={submitting}>
                     {submitting ? <><span className="spinner-border spinner-border-sm me-2" />Submitting…</> : <>Submit grievance <Icon name="arrowRight" size={18} /></>}
                   </button>
@@ -437,40 +448,33 @@ export default function CitizenPortal() {
               <div>
                 <span className="eyebrow">CASE TRACKING</span>
                 <h3 id="track-title">Check case progress</h3>
-                <p>Enter the reference ID and private access code from your receipt.</p>
+                <p>Enter the single tracking code from your submission receipt.</p>
               </div>
             </div>
             <form className="portal-form tracking-form" onSubmit={handleTrack}>
               <Alert>{trackingError}</Alert>
               <label className="form-label-wrap">
-                <span>Grievance reference ID <b>*</b></span>
+                <span>Tracking code <b>*</b></span>
                 <input
-                  className="form-control reference-input"
-                  value={trackingReference}
+                  className="form-control"
+                  value={trackingCode}
                   onChange={(event) => {
-                    setTrackingReference(event.target.value.toUpperCase());
-                    setTrackingToken('');
+                    setTrackingCode(event.target.value);
                     setTracking(null);
                     setTrackingError('');
                   }}
                   required
-                  pattern="CFX-[0-9]{8}-[A-F0-9]{12}"
-                  title="Enter the reference ID in the format CFX-YYYYMMDD-XXXXXXXXXXXX."
+                  pattern="(?:CFX-[A-Za-z0-9]{4}(?:-[A-Za-z0-9]{4}){3}|(?:[A-Za-z0-9]|-|_){20,64})"
+                  title="Enter the tracking code shown on your submission receipt."
                   autoComplete="off"
-                  placeholder="CFX-YYYYMMDD-XXXXXXXXXXXX"
+                  autoCapitalize="off"
+                  spellCheck="false"
+                  placeholder="CFX-ABCD-EFGH-JKLM-NPQR"
                 />
               </label>
-              <label className="form-label-wrap">
-                <span>Private access code <b>*</b></span>
-                <input
-                  className="form-control"
-                  value={trackingToken}
-                  onChange={(event) => setTrackingToken(event.target.value)}
-                  autoComplete="off"
-                  required
-                  placeholder="Enter your submission access code"
-                />
-              </label>
+              <p className="privacy-hint">
+                The latest tracking code is remembered in this browser tab for the current session.
+              </p>
               <button className="btn btn-outline-primary w-100" type="submit" disabled={trackingLoading}>
                 {trackingLoading ? <><span className="spinner-border spinner-border-sm me-2" />Checking…</> : 'Check status'}
               </button>
@@ -521,7 +525,7 @@ export default function CitizenPortal() {
             )}
             <div className="tracking-security">
               <span className="security-lock"><Icon name="lock" size={17} /></span>
-              <span><strong>Your case, kept private</strong><small>Your access code is required to retrieve status and attach documents.</small></span>
+              <span><strong>Your case, kept private</strong><small>Your tracking code is needed to retrieve status and attach documents.</small></span>
             </div>
           </aside>
         </div>
