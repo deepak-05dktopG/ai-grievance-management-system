@@ -357,34 +357,6 @@ Audit records relate to a grievance through its MongoDB ObjectId and public refe
 - Secrets belong in ignored backend `.env` files and must not be committed or placed in `VITE_` variables.
 - The prototype's development CORS allowlist and local-server setup are not suitable for public production deployment.
 
-## Screenshots and Demo
-
-Add genuine screenshots at these paths when available; the placeholders below are not screenshots.
-
-### Citizen portal
-
-![Placeholder for an actual citizen portal screenshot](docs/screenshots/citizen-portal.png)
-
-Expected file: `docs/screenshots/citizen-portal.png`
-
-### Officer dashboard
-
-![Placeholder for an actual officer dashboard screenshot](docs/screenshots/officer-dashboard.png)
-
-Expected file: `docs/screenshots/officer-dashboard.png`
-
-### Grievance details and AI suggestions
-
-![Placeholder for an actual grievance details screenshot](docs/screenshots/grievance-details-ai-suggestions.png)
-
-Expected file: `docs/screenshots/grievance-details-ai-suggestions.png`
-
-### Admin user management
-
-![Placeholder for an actual admin user management screenshot](docs/screenshots/admin-user-management.png)
-
-Expected file: `docs/screenshots/admin-user-management.png`
-
 ## Sample AI Input and Output
 
 **Synthetic input:**
