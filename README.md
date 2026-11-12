@@ -69,33 +69,6 @@ The backend validates the structured response against Pydantic models. Transient
 
 The presence of an integration in source code does not guarantee provider availability. No live provider request is made by installation or startup commands. A successful provider request is only established when a synthetic grievance submission completes classification at runtime.
 
-## System Architecture
-
-```mermaid
-flowchart LR
-    Citizen[Citizen browser]
-    Administration[DistrictOps administration console]
-    Grievance[Grievance portal page]
-    LocalState[Browser-local operational state]
-    API[FastAPI backend]
-    Groq[Groq API]
-    Mongo[(MongoDB Atlas)]
-    Cloudinary[Cloudinary]
-
-    Citizen -->|Submit, track, upload| Grievance
-    Administration -->|Operational work, coordination, governance| LocalState
-    Administration -->|Open grievance workspace| Grievance
-    Grievance -->|REST and JSON| API
-    API -->|Complaint description for advisory classification| Groq
-    Groq -->|Structured suggestion| API
-    API -->|Persist cases, users, and audit events| Mongo
-    API -->|Upload validated attachments| Cloudinary
-    Cloudinary -->|File metadata and secure URL| API
-    API -->|Case and tracking responses| Grievance
-```
-
-The administration console is primarily a local browser prototype today. The grievance page is the part of the frontend wired to the FastAPI API.
-
 ## Internal administration workflow
 
 ```mermaid
