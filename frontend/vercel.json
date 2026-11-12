@@ -1,0 +1,11 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "districtops-frontend/dist",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/app/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

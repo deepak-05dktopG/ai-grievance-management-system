@@ -11,6 +11,12 @@ npm run dev
 
 Create a production build with `npm run build`.
 
+## Deploy on Vercel
+
+Set the Vercel project **Root Directory** to `frontend`. The included [`vercel.json`](../vercel.json) builds this combined app and publishes `districtops-frontend/dist`.
+
+If the grievance API should be live after deployment, add `VITE_API_BASE_URL` as a Vercel environment variable with the deployed backend URL. Without it, the demo UI still loads, but the grievance API client falls back to `http://localhost:8000`.
+
 ## Demo behavior
 
 - Choose a simulated role on the entry screen to preview role-aware navigation.
