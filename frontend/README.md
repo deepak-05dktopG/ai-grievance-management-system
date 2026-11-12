@@ -1,37 +1,135 @@
-# DistrictOps AI prototype
+# CreditFix frontend
 
-This is the single frontend application for the DistrictOps and AI grievance demonstrations. It does not replace or modify the backend.
+The `frontend` directory contains the complete frontend for the CreditFix prototype. It is one Vite application with one `package.json`, one lockfile and one `src/` tree.
 
-## Run locally
+The build exposes two page entries:
+
+- DistrictOps operations workspace: `/`
+- AI grievance portal: `/grievance.html`
+
+The grievance portal is a separate page entry within the same frontend package. It is not a nested frontend application.
+
+## Requirements
+
+- Node.js 22.x
+- npm
+- The repository cloned locally
+
+The required Node version is declared in [`package.json`](./package.json). Run all frontend commands from this directory, not from the repository root.
+
+## Frontend setup workflow
+
+### 1. Open the frontend directory
 
 ```powershell
-npm install
+cd .\frontend
+```
+
+### 2. Install dependencies
+
+Use the lockfile for a reproducible installation:
+
+```powershell
+npm ci
+```
+
+Use `npm install` only when intentionally changing dependencies.
+
+### 3. Configure the grievance API when required
+
+The DistrictOps prototype works with synthetic local data and does not require a backend. The grievance portal can call the FastAPI backend when `VITE_API_BASE_URL` is set.
+
+Create `frontend/.env.local` when running against a local backend:
+
+```dotenv
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Do not commit `.env.local` or any file containing API keys. Vite exposes variables prefixed with `VITE_` to browser code, so only public, non-secret configuration belongs there.
+
+### 4. Start the development server
+
+```powershell
 npm run dev
 ```
 
-Create a production build with `npm run build`.
+Open the URL printed by Vite, normally:
 
-## Deploy on Vercel
+- `http://localhost:5173/` for DistrictOps
+- `http://localhost:5173/grievance.html#/` for the citizen grievance portal
+- `http://localhost:5173/grievance.html#/login` for officer sign-in
+- `http://localhost:5173/grievance.html#/dashboard` for the officer dashboard
 
-Set the Vercel project **Root Directory** to `frontend`. The included [`vercel.json`](./vercel.json) builds this combined app and publishes `dist`.
+DistrictOps uses `BrowserRouter`. The grievance portal uses `HashRouter`, which keeps its nested routes working when it is embedded from the DistrictOps AI grievance workspace.
 
-If the grievance API should be live after deployment, add `VITE_API_BASE_URL` as a Vercel environment variable with the deployed backend URL. Without it, the demo UI still loads, but the grievance API client falls back to `http://localhost:8000`.
+## Available commands
 
-## Demo behavior
+Run these commands from [`frontend/`](./):
 
-- Choose a simulated role on the entry screen to preview role-aware navigation.
-- Use the task, meeting, file, field, document and coordination modules to create or update records.
-- Shared records are stored in browser `localStorage`; clear the `districtops-demo-state-v1` and `districtops-demo-user-v1` keys to restore the seed data.
-- AI, OCR, document retrieval, voice and multi-capability workflow outputs are illustrative local demonstrations. No AI service, speech service, government system or external data source is connected.
-- All included departments, people, tasks, documents and circulars are synthetic. Synthetic circulars are not legal or official guidance.
-- Role selection is a user-interface demonstration only, not authentication or backend authorization.
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the Vite development server |
+| `npm run build` | Create the production build in `dist/` |
+| `npm run preview` | Serve the production build locally |
 
-## Included grievance application
+Before submitting frontend changes, run:
 
-The existing AI grievance frontend is included under [`src/grievance-portal/`](./src/grievance-portal/). It is a second Vite page entry, not a second package or frontend application:
+```powershell
+npm run build
+```
 
-- Citizen portal: `/grievance.html#/`
-- Officer sign in: `/grievance.html#/login`
-- Officer dashboard: `/grievance.html#/dashboard`
+This validates the Vite multi-page configuration and catches import or production-bundling errors.
 
-DistrictOps exposes the same application from its **AI grievance system** workspace. The grievance code retains its own `HashRouter`, authentication context, API service and pages while sharing this one package and one `src/` tree. It uses `VITE_API_BASE_URL` when provided and otherwise targets `http://localhost:8000`.
+## Project structure
+
+```text
+frontend/
+├── index.html                 # DistrictOps entry
+├── grievance.html             # Grievance portal entry
+├── package.json               # Single frontend package
+├── package-lock.json          # Locked dependency tree
+├── vite.config.js             # React and multi-page build configuration
+├── vercel.json                # Vercel build and routing configuration
+└── src/
+    ├── App.jsx                # DistrictOps shell and routes
+    ├── components/            # Shared DistrictOps UI primitives
+    ├── context/               # DistrictOps state and local persistence
+    ├── data/                  # Synthetic prototype data
+    ├── pages/                 # DistrictOps feature modules
+    └── grievance-portal/      # Grievance pages, context, services and styles
+```
+
+Keep DistrictOps changes in the existing application structure. Add grievance changes under [`src/grievance-portal/`](./src/grievance-portal/) and preserve its `HashRouter` entry unless the page routing design is intentionally changed.
+
+## Development workflow
+
+1. Pull the latest changes and run `npm ci`.
+2. Start `npm run dev` from `frontend/`.
+3. Use the DistrictOps workspace to review role-aware navigation and feature modules.
+4. Use the AI grievance system workspace or the direct grievance URL to verify citizen and officer flows.
+5. Confirm local state behavior by refreshing the browser. DistrictOps demo records are persisted in `localStorage`.
+6. Run `npm run build` before opening a pull request or deploying.
+
+DistrictOps demo state can be reset by removing these browser storage keys:
+
+- `districtops-demo-state-v1`
+- `districtops-demo-user-v1`
+
+## Vercel deployment
+
+Configure the Vercel project as follows:
+
+- **Root Directory:** `frontend`
+- **Build Command:** `npm run build`
+- **Output Directory:** `dist`
+- **Node.js version:** `22.x`
+
+[`vercel.json`](./vercel.json) contains the build and SPA rewrite configuration. Set `VITE_API_BASE_URL` in the Vercel project environment variables if the deployed grievance portal should call a deployed backend. A frontend deployment alone does not provide the FastAPI or MongoDB services.
+
+## Prototype boundaries
+
+- DistrictOps records, notifications, audit history and workflow interactions use synthetic data and browser-local state.
+- AI, OCR, document retrieval, voice and agent workflows are illustrative UI demonstrations; no external AI or government system is connected.
+- Included departments, users, tasks, documents and circulars are synthetic. Synthetic circulars are not official or legal guidance.
+- Role selection in DistrictOps is a UI demonstration, not authentication or backend authorization.
+- The grievance portal uses the configured API when available and otherwise falls back to `http://localhost:8000`; backend availability and authentication are separate from the static frontend build.
