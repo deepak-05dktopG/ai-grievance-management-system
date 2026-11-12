@@ -1,6 +1,8 @@
-# AI-Powered Grievance Management System
+# DistrictOps AI — Internal District Administration Prototype
 
-A prototype web application for submitting and managing public grievances in a hypothetical Indian district administration. Citizens can submit and track a case; authorized officers can review, update, and audit cases. Groq provides advisory classification, while department assignment remains deterministic.
+DistrictOps AI is a frontend-led prototype for the internal administration of a hypothetical Indian district. It brings operational dashboards, departmental work queues, task coordination, meetings, field operations, document and circular search, reports, notifications, audit history, governance controls, and a connected AI grievance workspace into one administration console.
+
+The project also includes a FastAPI grievance service. The grievance system is one integrated module within the wider administration platform, not the definition of the whole product. DistrictOps operational data is synthetic and stored locally in the browser, while grievance submissions can use the backend, MongoDB, Groq, and Cloudinary integrations when configured.
 
 ## Assessment Links and Documents
 
@@ -13,23 +15,32 @@ A prototype web application for submitting and managing public grievances in a h
 
 > **Prototype notice:** This project uses synthetic data and is not connected to actual government systems. It has not been prepared or audited as a production service.
 
-## Project Overview
+## Internal administration capabilities
 
-District administrations receive complaints across multiple departments and need a consistent way to capture submissions, route them for review, communicate progress, and preserve decision history. This prototype provides a shared intake and case-management workflow:
+The DistrictOps workspace is designed around the daily operating rhythm of a district administration:
 
-1. A citizen submits a complaint and receives a single private tracking code.
-2. The backend requests an AI classification when Groq is configured, then maps a supported category to a department using fixed rules.
-3. Authorized staff view cases within their access scope, record approved values, and update case status.
-4. Citizens use the tracking code to see limited status and timestamp information.
+- **Command dashboard:** workload, service signals, pending actions, alerts, and operational priorities.
+- **Department workspaces:** department-level queues, ownership, progress, and coordination across teams.
+- **Task management:** create, assign, prioritize, filter, and update operational tasks.
+- **Coordination:** share cross-department requests and monitor handoffs.
+- **Meetings:** plan meetings, record attendance and decisions, and track follow-up actions.
+- **Files and documents:** organize working files, move records through controlled folders, and review document metadata.
+- **Reports:** review operational summaries and export-ready reporting views.
+- **Circular search:** search synthetic circulars and administrative references from the workspace.
+- **Field operations:** manage inspections, visits, field notes, and follow-up work.
+- **AI assistant and controlled workflows:** demonstrate retrieval, drafting, voice, and multi-step assistance with explicit human control.
+- **Notifications and audit history:** surface important events and preserve a local activity trail.
+- **User management and governance:** demonstrate role-aware navigation, access review, and administration controls.
+- **AI grievance system:** open the connected citizen intake and officer case-management application from the administration console.
 
-AI output is advisory only. Authorized staff retain responsibility for case decisions.
+The current DistrictOps screens are a realistic interaction prototype. They use synthetic seed data and browser-local persistence rather than a production government system.
 
-## Key Features
+## Integrated grievance capabilities
+
+The grievance module provides the public case lifecycle that supports the internal administration workflow:
 
 - Public citizen grievance submission with input validation.
-- AI-assisted category and subcategory classification.
-- AI-generated complaint summary and suggested priority.
-- Confidence estimate and explanation accompanying the suggestion.
+- AI-assisted category, subcategory, summary, priority, confidence, and explanation.
 - Deterministic category-to-department recommendation.
 - Officer review and corrections stored separately from AI suggestions.
 - Citizen tracking using one random, grievance-specific tracking code.
@@ -37,6 +48,8 @@ AI output is advisory only. Authorized staff retain responsibility for case deci
 - Audit events for grievance submission, review, status changes, and document uploads.
 - JWT authentication and role/department-based staff access control.
 - Administrator account creation for officers and administrators.
+
+AI output is advisory only. Authorized staff retain responsibility for case decisions.
 
 ## AI Capabilities
 
@@ -61,43 +74,50 @@ The presence of an integration in source code does not guarantee provider availa
 ```mermaid
 flowchart LR
     Citizen[Citizen browser]
-    Staff[Officer or admin browser]
-    Frontend[React and Vite frontend]
+    Administration[DistrictOps administration console]
+    Grievance[Grievance portal page]
+    LocalState[Browser-local operational state]
     API[FastAPI backend]
     Groq[Groq API]
     Mongo[(MongoDB Atlas)]
     Cloudinary[Cloudinary]
 
-    Citizen -->|Submit, track, upload| Frontend
-    Staff -->|Sign in, review, manage| Frontend
-    Frontend -->|REST and JSON| API
+    Citizen -->|Submit, track, upload| Grievance
+    Administration -->|Operational work, coordination, governance| LocalState
+    Administration -->|Open grievance workspace| Grievance
+    Grievance -->|REST and JSON| API
     API -->|Complaint description for advisory classification| Groq
     Groq -->|Structured suggestion| API
     API -->|Persist cases, users, and audit events| Mongo
     API -->|Upload validated attachments| Cloudinary
     Cloudinary -->|File metadata and secure URL| API
-    API -->|Case and tracking responses| Frontend
+    API -->|Case and tracking responses| Grievance
 ```
 
-## Application Workflow
+The administration console is primarily a local browser prototype today. The grievance page is the part of the frontend wired to the FastAPI API.
+
+## Internal administration workflow
 
 ```mermaid
 flowchart TD
-    A[Citizen submits grievance] --> B[FastAPI validates request]
-    B --> C{Groq configured and available?}
-    C -->|Yes| D[Groq returns classification suggestion]
-    C -->|No or invalid response| E[Mark for manual review]
-    D --> F[Validate structured response]
-    F --> G{Supported category and sufficient confidence?}
-    G -->|Yes| H[Map department using deterministic rules]
-    G -->|No| E
-    H --> I[Save grievance and submission audit event]
-    E --> I
-    I --> J[Return one-time tracking code]
-    J --> K[Authorized officer reviews and may correct suggestion]
-    K --> L[Officer updates status; audit event is recorded]
-    L --> M[Citizen tracks status with the single code]
+    A[Administrator or officer signs in] --> B[Open command dashboard]
+    B --> C[Review alerts, workload, and pending actions]
+    C --> D{Choose operational area}
+    D --> E[Assign and update tasks]
+    D --> F[Coordinate departments and meetings]
+    D --> G[Manage field work, files, and documents]
+    D --> H[Search circulars and prepare reports]
+    D --> I[Review notifications, audit history, and governance]
+    E --> J[Record activity in local prototype state]
+    F --> J
+    G --> J
+    H --> J
+    I --> J
+    J --> K[Human reviews AI-assisted suggestions before action]
+    K --> B
 ```
+
+The grievance lifecycle remains available from the **AI grievance system** workspace: citizen intake is classified by the backend when configured, routed through deterministic rules, reviewed by authorized staff, and tracked with audit events.
 
 ## Technology Stack
 
@@ -131,16 +151,17 @@ flowchart TD
 │   └── requirements.txt      # Python dependencies
 ├── frontend/
 │   ├── src/
-│   │   ├── components/       # Shared interface components
-│   │   ├── context/          # Authentication/session state
-│   │   ├── layouts/          # Authenticated application shell
-│   │   ├── pages/            # Citizen, staff, and admin screens
-│   │   ├── services/         # HTTP API client
-│   │   ├── App.jsx           # Routes and route guards
-│   │   └── main.jsx          # React entry point
+│   │   ├── components/          # Shared DistrictOps interface components
+│   │   ├── context/             # DistrictOps operational state and persistence
+│   │   ├── data/                # Synthetic departments, tasks, files, users, and events
+│   │   ├── pages/               # DistrictOps administration modules
+│   │   ├── grievance-portal/    # Integrated citizen and officer grievance application
+│   │   ├── App.jsx              # DistrictOps shell and route guards
+│   │   └── main.jsx             # DistrictOps React entry point
+│   ├── grievance.html           # Grievance page entry within the same Vite app
 │   ├── .env.example          # Frontend API-origin template
-│   ├── package.json          # Scripts and dependencies
-│   └── vite.config.js        # Vite configuration (port 5173)
+│   ├── package.json           # Single frontend package
+│   └── vite.config.js         # Vite multi-page configuration
 └── README.md
 ```
 
@@ -149,7 +170,7 @@ Important backend entry points include `backend/app/api/grievances.py`, `backend
 ## Prerequisites
 
 - Python 3.11 (also required for the standard-library `StrEnum` used by the backend).
-- Node.js 18 or newer and npm (Vite 5 frontend).
+- Node.js 22.x and npm (Vite frontend).
 - A MongoDB deployment with transaction support. The application is configured for MongoDB Atlas.
 - Groq API credentials for provider-backed classification. The backend can mark submissions for manual review when classification is unconfigured or fails.
 - Cloudinary credentials if document upload is required.
@@ -184,7 +205,7 @@ npm install
 Copy-Item .env.example .env
 ```
 
-Set `VITE_API_BASE_URL=http://127.0.0.1:8000` in `frontend/.env`. Variables prefixed with `VITE_` are included in browser code; never put secrets in them.
+Set `VITE_API_BASE_URL=http://127.0.0.1:8000` in `frontend/.env`. Variables prefixed with `VITE_` are included in browser code; never put secrets in them. The DistrictOps administration prototype itself does not require the backend to load.
 
 ## Environment Variables
 
@@ -244,10 +265,10 @@ The frontend `.env` should point `VITE_API_BASE_URL` to `http://127.0.0.1:8000`.
 
 | Page / service | URL |
 |---|---|
-| Citizen portal | `http://127.0.0.1:5173/` |
-| Staff login | `http://127.0.0.1:5173/login` |
-| Staff dashboard | `http://127.0.0.1:5173/dashboard` |
-| Admin user management | `http://127.0.0.1:5173/dashboard/users` |
+| DistrictOps administration console | `http://127.0.0.1:5173/` |
+| Citizen grievance portal | `http://127.0.0.1:5173/grievance.html#/` |
+| Grievance officer login | `http://127.0.0.1:5173/grievance.html#/login` |
+| Grievance officer dashboard | `http://127.0.0.1:5173/grievance.html#/dashboard` |
 | Backend health | `http://127.0.0.1:8000/health` |
 | Interactive API docs | `http://127.0.0.1:8000/docs` |
 
