@@ -1,6 +1,6 @@
 # DistrictOps AI prototype
 
-This is a standalone, frontend-only demonstration workspace. It does not replace or modify the existing grievance-management application.
+This is the single frontend application for the DistrictOps and AI grievance demonstrations. It does not replace or modify the backend.
 
 ## Run locally
 
@@ -13,7 +13,7 @@ Create a production build with `npm run build`.
 
 ## Deploy on Vercel
 
-Set the Vercel project **Root Directory** to `frontend`. The included [`vercel.json`](../vercel.json) builds this combined app and publishes `districtops-frontend/dist`.
+Set the Vercel project **Root Directory** to `frontend`. The included [`vercel.json`](./vercel.json) builds this combined app and publishes `dist`.
 
 If the grievance API should be live after deployment, add `VITE_API_BASE_URL` as a Vercel environment variable with the deployed backend URL. Without it, the demo UI still loads, but the grievance API client falls back to `http://localhost:8000`.
 
@@ -28,10 +28,10 @@ If the grievance API should be live after deployment, add `VITE_API_BASE_URL` as
 
 ## Included grievance application
 
-The existing AI grievance frontend is included at [`grievance-portal/`](./grievance-portal/). It is kept as a separate Vite entry point so its citizen and officer routes do not collide with the DistrictOps routes:
+The existing AI grievance frontend is included under [`src/grievance-portal/`](./src/grievance-portal/). It is a second Vite page entry, not a second package or frontend application:
 
-- Citizen portal: `/grievance-portal/index.html#/`
-- Officer sign in: `/grievance-portal/index.html#/login`
-- Officer dashboard: `/grievance-portal/index.html#/dashboard`
+- Citizen portal: `/grievance.html#/`
+- Officer sign in: `/grievance.html#/login`
+- Officer dashboard: `/grievance.html#/dashboard`
 
-DistrictOps exposes the same application from its **AI grievance system** workspace. The copied app retains its own `HashRouter`, authentication context, API service and pages. It uses `VITE_API_BASE_URL` when provided and otherwise targets `http://localhost:8000`.
+DistrictOps exposes the same application from its **AI grievance system** workspace. The grievance code retains its own `HashRouter`, authentication context, API service and pages while sharing this one package and one `src/` tree. It uses `VITE_API_BASE_URL` when provided and otherwise targets `http://localhost:8000`.

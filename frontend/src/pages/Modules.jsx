@@ -471,7 +471,7 @@ function GrievancePortalPage() {
   return <>
     <PageHeader eyebrow="OPERATIONS · CONNECTED CASE WORKSPACE" title="AI grievance system" description="The existing citizen and officer grievance portal is included as a separate application with its own routes." actions={<div className="portal-actions"><button className={`button ${portalPath === '/' ? 'button-primary' : 'button-secondary'}`} onClick={() => openPortal('/')}>Citizen portal</button><button className={`button ${portalPath === '/login' ? 'button-primary' : 'button-secondary'}`} onClick={() => openPortal('/login')}>Officer sign in</button></div>} />
     <div className="portal-notice"><strong>Separate routed application</strong><span>Grievance portal paths are isolated in this embedded view. API requests use <code>http://localhost:8000</code> by default; run the existing backend separately for live API workflows.</span></div>
-    <div className="grievance-frame-wrap"><iframe key={frameKey} className="grievance-frame" title="AI Grievance Management System" src={`/grievance-portal/index.html#${portalPath}`} /></div>
+    <div className="grievance-frame-wrap"><iframe key={frameKey} className="grievance-frame" title="AI Grievance Management System" src={`/grievance.html#${portalPath}`} /></div>
   </>;
 }
 
